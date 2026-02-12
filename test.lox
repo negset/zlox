@@ -1,0 +1,4 @@
+var drink = "Tea";
+var steep = 4;
+var cool = 2;
+print "hello world";
