@@ -89,9 +89,17 @@ pub const VM = struct {
         });
     }
 
-    pub fn interpret(self: *VM, source: []const u8) InterpretResult {
-        _ = self;
-        compiler.compile(source);
-        return .ok;
+    pub fn interpret(self: *VM, allocator: std.mem.Allocator, source: []const u8) InterpretResult {
+        var chunk = Chunk.init();
+        defer chunk.deinit(allocator);
+
+        if (!compiler.compile(allocator, source, &chunk)) {
+            return .compile_error;
+        }
+
+        self.chunk = &chunk;
+        self.ip = self.chunk.code.items.ptr;
+
+        return self.run();
     }
 };

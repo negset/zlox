@@ -42,8 +42,8 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         .negate => {
             return simpleInstruction("negate", offset);
         },
-        .ret => {
-            return simpleInstruction("ret", offset);
+        .@"return" => {
+            return simpleInstruction("return", offset);
         },
         // else => {
         //     std.debug.print("Unknown opcode {d}\n", .{instruction});

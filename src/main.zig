@@ -10,7 +10,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
     defer {
         const deinit_status = gpa.deinit();
-        if (deinit_status == .leak) @panic("memory leak");
+        if (deinit_status == .leak) @panic("Memory leak.");
     }
 
     const args = try std.process.argsAlloc(allocator);
@@ -20,7 +20,7 @@ pub fn main() !void {
     defer vm.deinit(allocator);
 
     switch (args.len) {
-        1 => try repl(&vm),
+        1 => repl(&vm, allocator),
         2 => runFile(&vm, allocator, args[1]),
         else => {
             std.debug.print("Usage: zlox [path]\n", .{});
@@ -29,7 +29,7 @@ pub fn main() !void {
     }
 }
 
-fn repl(vm: *VM) !void {
+fn repl(vm: *VM, allocator: std.mem.Allocator) void {
     var stdin_buf: [1024]u8 = undefined;
     var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
     const stdin = &stdin_reader.interface;
@@ -41,7 +41,7 @@ fn repl(vm: *VM) !void {
             break;
         };
 
-        _ = vm.interpret(line);
+        _ = vm.interpret(allocator, line);
     }
 }
 
@@ -64,7 +64,7 @@ fn runFile(vm: *VM, allocator: std.mem.Allocator, path: []const u8) void {
         std.process.exit(74);
     };
     defer allocator.free(source);
-    const result = vm.interpret(source);
+    const result = vm.interpret(allocator, source);
 
     switch (result) {
         .compile_error => std.posix.exit(65),
