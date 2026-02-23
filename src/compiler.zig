@@ -6,6 +6,7 @@ const Scanner = @import("scanner.zig").Scanner;
 const Token = @import("scanner.zig").Token;
 const TokenType = @import("scanner.zig").TokenType;
 const Value = @import("value.zig").Value;
+const debug = @import("debug.zig");
 
 const Precedence = enum {
     none,
@@ -19,6 +20,22 @@ const Precedence = enum {
     unary, // ! -
     call, // . ()
     primary,
+
+    pub fn next(self: Precedence) Precedence {
+        return @enumFromInt(@intFromEnum(self) + 1);
+    }
+
+    pub fn lessThan(self: Precedence, other: Precedence) bool {
+        return @intFromEnum(self) < @intFromEnum(other);
+    }
+};
+
+const ParseFn = *const fn (*Parser, Allocator) anyerror!void;
+
+const ParseRule = struct {
+    prefix: ?ParseFn,
+    infix: ?ParseFn,
+    precedence: Precedence,
 };
 
 const Parser = struct {
@@ -103,6 +120,27 @@ const Parser = struct {
 
     pub fn endCompiler(self: *Parser, allocator: Allocator) !void {
         try self.emitReturn(allocator);
+        if (debug.print_code) {
+            if (!self.had_error) {
+                debug.disassembleChunk(self.compiling_chunk, "code");
+            }
+        }
+    }
+
+    fn binary(self: *Parser, allocator: Allocator) !void {
+        const operator_type = self.previous.token_type;
+        const rule = getRule(operator_type);
+        try self.parsePrecedence(allocator, rule.precedence.next());
+
+        const op: OpCode =
+            switch (operator_type) {
+                .plus => .add,
+                .minus => .subtract,
+                .star => .multiply,
+                .slash => .divide,
+                else => unreachable,
+            };
+        try self.emitByte(allocator, @intFromEnum(op));
     }
 
     fn grouping(self: *Parser, allocator: Allocator) !void {
@@ -128,15 +166,35 @@ const Parser = struct {
         }
     }
 
-    fn parsePrecedence(self: *Parser, allocator: Allocator, precedence: Precedence) void {
-        //
-        _ = self;
-        _ = allocator;
-        _ = precedence;
+    fn parsePrecedence(self: *Parser, allocator: Allocator, precedence: Precedence) !void {
+        self.advance();
+
+        if (getRule(self.previous.token_type).prefix) |prefix_rule| {
+            try prefix_rule(self, allocator);
+        } else {
+            self.errorAtPrevious("Expect expression.");
+            return;
+        }
+
+        while (precedence.lessThan(getRule(self.current.token_type).precedence)) {
+            self.advance();
+            const infix_rule = getRule(self.current.token_type).infix;
+            try infix_rule.?(self, allocator);
+        }
+    }
+
+    fn getRule(token_type: TokenType) ParseRule {
+        return switch (token_type) {
+            .left_paren => .{ .prefix = grouping, .infix = null, .precedence = .none },
+            .minus => .{ .prefix = unary, .infix = binary, .precedence = .term },
+            .plus, .slash, .star => .{ .prefix = null, .infix = binary, .precedence = .term },
+            .number => .{ .prefix = number, .infix = null, .precedence = .none },
+            else => .{ .prefix = null, .infix = null, .precedence = .none },
+        };
     }
 
     pub fn expression(self: *Parser, allocator: Allocator) !void {
-        self.parsePrecedence(allocator, .assignment);
+        try self.parsePrecedence(allocator, .assignment);
     }
 };
 

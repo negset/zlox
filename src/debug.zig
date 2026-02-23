@@ -4,6 +4,7 @@ const OpCode = @import("chunk.zig").OpCode;
 const value = @import("value.zig");
 
 pub const trace_execution = true;
+pub const print_code = true;
 
 pub fn disassembleChunk(chunk: *const Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
