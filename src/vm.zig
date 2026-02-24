@@ -93,9 +93,9 @@ pub const VM = struct {
         var chunk = Chunk.init();
         defer chunk.deinit(allocator);
 
-        if (!compiler.compile(allocator, source, &chunk)) {
+        compiler.compile(allocator, source, &chunk) catch {
             return .compile_error;
-        }
+        };
 
         self.chunk = &chunk;
         self.ip = self.chunk.code.items.ptr;

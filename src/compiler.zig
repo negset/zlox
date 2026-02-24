@@ -25,8 +25,8 @@ const Precedence = enum {
         return @enumFromInt(@intFromEnum(self) + 1);
     }
 
-    pub fn lessThan(self: Precedence, other: Precedence) bool {
-        return @intFromEnum(self) < @intFromEnum(other);
+    pub fn le(self: Precedence, other: Precedence) bool {
+        return @intFromEnum(self) <= @intFromEnum(other);
     }
 };
 
@@ -43,9 +43,8 @@ const Parser = struct {
     compiling_chunk: *Chunk,
     current: Token = undefined,
     previous: Token = undefined,
-    had_error: bool = false,
 
-    fn errorAt(self: *Parser, token: Token, message: []const u8) void {
+    fn errorAt(token: Token, message: []const u8) !void {
         std.debug.print("[line {d}] Error", .{token.line});
 
         switch (token.token_type) {
@@ -55,35 +54,35 @@ const Parser = struct {
         }
 
         std.debug.print(": {s}\n", .{message});
-        self.had_error = true;
+        return error.CompileError;
     }
 
-    fn errorAtPrevious(self: *Parser, message: []const u8) void {
-        self.errorAt(self.previous, message);
+    fn errorAtPrevious(self: *Parser, message: []const u8) !void {
+        try errorAt(self.previous, message);
     }
 
-    fn errorAtCurrent(self: *Parser, message: []const u8) void {
-        self.errorAt(self.current, message);
+    fn errorAtCurrent(self: *Parser, message: []const u8) !void {
+        try errorAt(self.current, message);
     }
 
-    pub fn advance(self: *Parser) void {
+    pub fn advance(self: *Parser) !void {
         self.previous = self.current;
 
         while (true) {
             self.current = self.scanner.scanToken();
             if (self.current.token_type != .@"error") break;
 
-            self.errorAtCurrent(self.current.lexeme);
+            try self.errorAtCurrent(self.current.lexeme);
         }
     }
 
-    pub fn consume(self: *Parser, token_type: TokenType, message: []const u8) void {
+    pub fn consume(self: *Parser, token_type: TokenType, message: []const u8) !void {
         if (self.current.token_type == token_type) {
-            self.advance();
+            try self.advance();
             return;
         }
 
-        self.errorAtCurrent(message);
+        try self.errorAtCurrent(message);
     }
 
     fn emitByte(self: *Parser, allocator: Allocator, byte: u8) !void {
@@ -104,7 +103,7 @@ const Parser = struct {
         // Make sure the chunk does not contain too many constants,
         // since OpCode.constant uses a single byte for its index operand.
         const byte = std.math.cast(u8, index) orelse {
-            self.errorAtPrevious("Too many constants in one chunk.");
+            try self.errorAtPrevious("Too many constants in one chunk.");
             return 0;
         };
         return byte;
@@ -121,9 +120,7 @@ const Parser = struct {
     pub fn endCompiler(self: *Parser, allocator: Allocator) !void {
         try self.emitReturn(allocator);
         if (debug.print_code) {
-            if (!self.had_error) {
-                debug.disassembleChunk(self.compiling_chunk, "code");
-            }
+            debug.disassembleChunk(self.compiling_chunk, "code");
         }
     }
 
@@ -145,7 +142,7 @@ const Parser = struct {
 
     fn grouping(self: *Parser, allocator: Allocator) !void {
         try self.expression(allocator);
-        self.consume(.right_paren, "Expect ')' after expression.");
+        try self.consume(.right_paren, "Expect ')' after expression.");
     }
 
     fn number(self: *Parser, allocator: Allocator) !void {
@@ -167,17 +164,16 @@ const Parser = struct {
     }
 
     fn parsePrecedence(self: *Parser, allocator: Allocator, precedence: Precedence) !void {
-        self.advance();
-
+        try self.advance();
         if (getRule(self.previous.token_type).prefix) |prefix_rule| {
             try prefix_rule(self, allocator);
         } else {
-            self.errorAtPrevious("Expect expression.");
+            try self.errorAtPrevious("Expect expression.");
             return;
         }
 
-        while (precedence.lessThan(getRule(self.current.token_type).precedence)) {
-            self.advance();
+        while (precedence.le(getRule(self.current.token_type).precedence)) {
+            try self.advance();
             const infix_rule = getRule(self.current.token_type).infix;
             try infix_rule.?(self, allocator);
         }
@@ -198,16 +194,14 @@ const Parser = struct {
     }
 };
 
-pub fn compile(allocator: Allocator, source: []const u8, chunk: *Chunk) bool {
+pub fn compile(allocator: Allocator, source: []const u8, chunk: *Chunk) !void {
     var scanner = Scanner.init(source);
-
-    var parser: Parser = .{
+    var parser = Parser{
         .scanner = &scanner,
         .compiling_chunk = chunk,
     };
-    parser.advance();
-    parser.expression(allocator) catch @panic("TODO");
-    parser.consume(.eof, "Expect end of expression.");
-    parser.endCompiler(allocator) catch @panic("TODO");
-    return !parser.had_error;
+    try parser.advance();
+    try parser.expression(allocator);
+    try parser.consume(.eof, "Expect end of expression.");
+    try parser.endCompiler(allocator);
 }
