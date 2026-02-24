@@ -183,7 +183,8 @@ const Parser = struct {
         return switch (token_type) {
             .left_paren => .{ .prefix = grouping, .infix = null, .precedence = .none },
             .minus => .{ .prefix = unary, .infix = binary, .precedence = .term },
-            .plus, .slash, .star => .{ .prefix = null, .infix = binary, .precedence = .term },
+            .plus => .{ .prefix = null, .infix = binary, .precedence = .term },
+            .slash, .star => .{ .prefix = null, .infix = binary, .precedence = .factor },
             .number => .{ .prefix = number, .infix = null, .precedence = .none },
             else => .{ .prefix = null, .infix = null, .precedence = .none },
         };
