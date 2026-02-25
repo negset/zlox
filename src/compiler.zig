@@ -174,7 +174,7 @@ const Parser = struct {
 
         while (precedence.le(getRule(self.current.token_type).precedence)) {
             try self.advance();
-            const infix_rule = getRule(self.current.token_type).infix;
+            const infix_rule = getRule(self.previous.token_type).infix;
             try infix_rule.?(self, allocator);
         }
     }
