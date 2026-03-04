@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const Value = @import("value.zig").Value;
 const ValueArray = @import("value.zig").ValueArray;
 
@@ -25,18 +26,18 @@ pub const Chunk = struct {
         };
     }
 
-    pub fn deinit(self: *Chunk, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Chunk, allocator: Allocator) void {
         self.code.deinit(allocator);
         self.lines.deinit(allocator);
         self.constants.deinit(allocator);
     }
 
-    pub fn write(self: *Chunk, allocator: std.mem.Allocator, byte: u8, line: u32) !void {
+    pub fn write(self: *Chunk, allocator: Allocator, byte: u8, line: u32) !void {
         try self.code.append(allocator, byte);
         try self.lines.append(allocator, line);
     }
 
-    pub fn addConstant(self: *Chunk, allocator: std.mem.Allocator, value: Value) !usize {
+    pub fn addConstant(self: *Chunk, allocator: Allocator, value: Value) !usize {
         try self.constants.write(allocator, value);
         return self.constants.values.items.len - 1;
     }

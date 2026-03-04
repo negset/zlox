@@ -8,6 +8,8 @@ const TokenType = @import("scanner.zig").TokenType;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 
+pub const Error = error{InvalidCode} || Allocator.Error;
+
 const Precedence = enum {
     none,
     assignment, // =
@@ -30,7 +32,7 @@ const Precedence = enum {
     }
 };
 
-const ParseFn = *const fn (*Parser, Allocator) anyerror!void;
+const ParseFn = *const fn (*Parser, Allocator) Error!void;
 
 const ParseRule = struct {
     prefix: ?ParseFn,
@@ -44,7 +46,7 @@ const Parser = struct {
     current: Token = undefined,
     previous: Token = undefined,
 
-    fn errorAt(token: Token, message: []const u8) !void {
+    fn errorAt(token: Token, message: []const u8) Error!void {
         std.debug.print("[line {d}] Error", .{token.line});
 
         switch (token.token_type) {
@@ -54,18 +56,18 @@ const Parser = struct {
         }
 
         std.debug.print(": {s}\n", .{message});
-        return error.CompileError;
+        return Error.InvalidCode;
     }
 
-    fn errorAtPrevious(self: *Parser, message: []const u8) !void {
+    fn errorAtPrevious(self: *Parser, message: []const u8) Error!void {
         try errorAt(self.previous, message);
     }
 
-    fn errorAtCurrent(self: *Parser, message: []const u8) !void {
+    fn errorAtCurrent(self: *Parser, message: []const u8) Error!void {
         try errorAt(self.current, message);
     }
 
-    pub fn advance(self: *Parser) !void {
+    pub fn advance(self: *Parser) Error!void {
         self.previous = self.current;
 
         while (true) {
@@ -76,7 +78,7 @@ const Parser = struct {
         }
     }
 
-    pub fn consume(self: *Parser, token_type: TokenType, message: []const u8) !void {
+    pub fn consume(self: *Parser, token_type: TokenType, message: []const u8) Error!void {
         if (self.current.token_type == token_type) {
             try self.advance();
             return;
@@ -85,20 +87,20 @@ const Parser = struct {
         try self.errorAtCurrent(message);
     }
 
-    fn emitByte(self: *Parser, allocator: Allocator, byte: u8) !void {
+    fn emitByte(self: *Parser, allocator: Allocator, byte: u8) Error!void {
         try self.compiling_chunk.write(allocator, byte, self.previous.line);
     }
 
-    fn emitBytes(self: *Parser, allocator: Allocator, byte1: u8, byte2: u8) !void {
+    fn emitBytes(self: *Parser, allocator: Allocator, byte1: u8, byte2: u8) Error!void {
         try self.emitByte(allocator, byte1);
         try self.emitByte(allocator, byte2);
     }
 
-    fn emitReturn(self: *Parser, allocator: Allocator) !void {
+    fn emitReturn(self: *Parser, allocator: Allocator) Error!void {
         try self.emitByte(allocator, @intFromEnum(OpCode.@"return"));
     }
 
-    fn makeConstant(self: *Parser, allocator: Allocator, value: Value) !u8 {
+    fn makeConstant(self: *Parser, allocator: Allocator, value: Value) Error!u8 {
         const index = try self.compiling_chunk.addConstant(allocator, value);
         // Make sure the chunk does not contain too many constants,
         // since OpCode.constant uses a single byte for its index operand.
@@ -109,7 +111,7 @@ const Parser = struct {
         return byte;
     }
 
-    fn emitConstant(self: *Parser, allocator: Allocator, value: Value) !void {
+    fn emitConstant(self: *Parser, allocator: Allocator, value: Value) Error!void {
         try self.emitBytes(
             allocator,
             @intFromEnum(OpCode.constant),
@@ -117,14 +119,14 @@ const Parser = struct {
         );
     }
 
-    pub fn endCompiler(self: *Parser, allocator: Allocator) !void {
+    pub fn endCompiler(self: *Parser, allocator: Allocator) Error!void {
         try self.emitReturn(allocator);
         if (debug.print_code) {
             debug.disassembleChunk(self.compiling_chunk, "code");
         }
     }
 
-    fn binary(self: *Parser, allocator: Allocator) !void {
+    fn binary(self: *Parser, allocator: Allocator) Error!void {
         const operator_type = self.previous.token_type;
         const rule = getRule(operator_type);
         try self.parsePrecedence(allocator, rule.precedence.next());
@@ -140,17 +142,17 @@ const Parser = struct {
         try self.emitByte(allocator, @intFromEnum(op));
     }
 
-    fn grouping(self: *Parser, allocator: Allocator) !void {
+    fn grouping(self: *Parser, allocator: Allocator) Error!void {
         try self.expression(allocator);
         try self.consume(.right_paren, "Expect ')' after expression.");
     }
 
-    fn number(self: *Parser, allocator: Allocator) !void {
+    fn number(self: *Parser, allocator: Allocator) Error!void {
         const value = try std.fmt.parseFloat(Value, self.previous.lexeme);
         try self.emitConstant(allocator, value);
     }
 
-    fn unary(self: *Parser, allocator: Allocator) !void {
+    fn unary(self: *Parser, allocator: Allocator) Error!void {
         const operator_type = self.previous.token_type;
 
         // Compile the operand.
@@ -163,7 +165,7 @@ const Parser = struct {
         }
     }
 
-    fn parsePrecedence(self: *Parser, allocator: Allocator, precedence: Precedence) !void {
+    fn parsePrecedence(self: *Parser, allocator: Allocator, precedence: Precedence) Error!void {
         try self.advance();
         if (getRule(self.previous.token_type).prefix) |prefix_rule| {
             try prefix_rule(self, allocator);
@@ -190,12 +192,12 @@ const Parser = struct {
         };
     }
 
-    pub fn expression(self: *Parser, allocator: Allocator) !void {
+    pub fn expression(self: *Parser, allocator: Allocator) Error!void {
         try self.parsePrecedence(allocator, .assignment);
     }
 };
 
-pub fn compile(allocator: Allocator, source: []const u8, chunk: *Chunk) !void {
+pub fn compile(allocator: Allocator, source: []const u8, chunk: *Chunk) Error!void {
     var scanner = Scanner.init(source);
     var parser = Parser{
         .scanner = &scanner,

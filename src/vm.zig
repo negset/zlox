@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const compiler = @import("compiler.zig");
@@ -19,7 +20,7 @@ pub const VM = struct {
     ip: [*]const u8,
     stack: std.ArrayList(Value),
 
-    pub fn init(allocator: std.mem.Allocator) !VM {
+    pub fn init(allocator: Allocator) Allocator.Error!VM {
         return .{
             .chunk = undefined,
             .ip = undefined,
@@ -27,7 +28,7 @@ pub const VM = struct {
         };
     }
 
-    pub fn deinit(self: *VM, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *VM, allocator: Allocator) void {
         self.stack.deinit(allocator);
     }
 
@@ -89,13 +90,11 @@ pub const VM = struct {
         });
     }
 
-    pub fn interpret(self: *VM, allocator: std.mem.Allocator, source: []const u8) InterpretResult {
+    pub fn interpret(self: *VM, allocator: Allocator, source: []const u8) InterpretResult {
         var chunk = Chunk.init();
         defer chunk.deinit(allocator);
 
-        compiler.compile(allocator, source, &chunk) catch {
-            return .compile_error;
-        };
+        compiler.compile(allocator, source, &chunk) catch return .compile_error;
 
         self.chunk = &chunk;
         self.ip = self.chunk.code.items.ptr;
