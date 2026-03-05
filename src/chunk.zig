@@ -32,12 +32,12 @@ pub const Chunk = struct {
         self.constants.deinit(allocator);
     }
 
-    pub fn write(self: *Chunk, allocator: Allocator, byte: u8, line: u32) !void {
+    pub fn write(self: *Chunk, allocator: Allocator, byte: u8, line: u32) Allocator.Error!void {
         try self.code.append(allocator, byte);
         try self.lines.append(allocator, line);
     }
 
-    pub fn addConstant(self: *Chunk, allocator: Allocator, value: Value) !usize {
+    pub fn addConstant(self: *Chunk, allocator: Allocator, value: Value) Allocator.Error!usize {
         try self.constants.write(allocator, value);
         return self.constants.values.items.len - 1;
     }

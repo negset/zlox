@@ -148,7 +148,7 @@ const Parser = struct {
     }
 
     fn number(self: *Parser, allocator: Allocator) Error!void {
-        const value = try std.fmt.parseFloat(Value, self.previous.lexeme);
+        const value = std.fmt.parseFloat(Value, self.previous.lexeme) catch @panic("Invalid float.");
         try self.emitConstant(allocator, value);
     }
 
