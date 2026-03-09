@@ -41,7 +41,9 @@ fn repl(vm: *VM, allocator: std.mem.Allocator) void {
             break;
         };
 
-        _ = vm.interpret(allocator, line);
+        vm.interpret(allocator, line) catch |err| {
+            std.debug.print("[{s}]\n", .{@errorName(err)});
+        };
     }
 }
 
@@ -64,11 +66,10 @@ fn runFile(vm: *VM, allocator: std.mem.Allocator, path: []const u8) void {
         std.process.exit(74);
     };
     defer allocator.free(source);
-    const result = vm.interpret(allocator, source);
 
-    switch (result) {
-        .compile_error => std.posix.exit(65),
-        .runtime_error => std.posix.exit(70),
-        .ok => return,
-    }
+    vm.interpret(allocator, source) catch |err| switch (err) {
+        error.InvalidCode => std.posix.exit(65),
+        error.InvalidOperand => std.process.exit(70),
+        error.OutOfMemory => std.process.exit(71),
+    };
 }

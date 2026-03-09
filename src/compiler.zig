@@ -35,9 +35,9 @@ const Precedence = enum {
 const ParseFn = *const fn (*Parser, Allocator) Error!void;
 
 const ParseRule = struct {
-    prefix: ?ParseFn,
-    infix: ?ParseFn,
-    precedence: Precedence,
+    prefix: ?ParseFn = null,
+    infix: ?ParseFn = null,
+    precedence: Precedence = .none,
 };
 
 const Parser = struct {
@@ -96,8 +96,14 @@ const Parser = struct {
         try self.emitByte(allocator, byte2);
     }
 
+    fn emitOps(self: *Parser, allocator: Allocator, ops: []const OpCode) Error!void {
+        for (ops) |op| {
+            try self.emitByte(allocator, @intFromEnum(op));
+        }
+    }
+
     fn emitReturn(self: *Parser, allocator: Allocator) Error!void {
-        try self.emitByte(allocator, @intFromEnum(OpCode.@"return"));
+        try self.emitOps(allocator, &.{.@"return"});
     }
 
     fn makeConstant(self: *Parser, allocator: Allocator, value: Value) Error!u8 {
@@ -130,16 +136,28 @@ const Parser = struct {
         const operator_type = self.previous.token_type;
         const rule = getRule(operator_type);
         try self.parsePrecedence(allocator, rule.precedence.next());
+        try self.emitOps(allocator, switch (operator_type) {
+            .minus => &.{.subtract},
+            .plus => &.{.add},
+            .slash => &.{.divide},
+            .star => &.{.multiply},
+            .bang_equal => &.{ .equal, .not },
+            .equal_equal => &.{.equal},
+            .greater => &.{.greater},
+            .greater_equal => &.{ .less, .not },
+            .less => &.{.less},
+            .less_equal => &.{ .greater, .not },
+            else => unreachable,
+        });
+    }
 
-        const op: OpCode =
-            switch (operator_type) {
-                .plus => .add,
-                .minus => .subtract,
-                .star => .multiply,
-                .slash => .divide,
-                else => unreachable,
-            };
-        try self.emitByte(allocator, @intFromEnum(op));
+    fn literal(self: *Parser, allocator: Allocator) Error!void {
+        try self.emitOps(allocator, switch (self.previous.token_type) {
+            .false => &.{.false},
+            .nil => &.{.nil},
+            .true => &.{.true},
+            else => unreachable,
+        });
     }
 
     fn grouping(self: *Parser, allocator: Allocator) Error!void {
@@ -148,8 +166,9 @@ const Parser = struct {
     }
 
     fn number(self: *Parser, allocator: Allocator) Error!void {
-        const value = std.fmt.parseFloat(Value, self.previous.lexeme) catch @panic("Invalid float.");
-        try self.emitConstant(allocator, value);
+        const value = std.fmt.parseFloat(f64, self.previous.lexeme) catch
+            @panic("Invalid number.");
+        try self.emitConstant(allocator, .{ .number = value });
     }
 
     fn unary(self: *Parser, allocator: Allocator) Error!void {
@@ -160,7 +179,8 @@ const Parser = struct {
 
         // Emit the operator instruction.
         switch (operator_type) {
-            .minus => try self.emitByte(allocator, @intFromEnum(OpCode.negate)),
+            .minus => try self.emitOps(allocator, &.{.negate}),
+            .bang => try self.emitOps(allocator, &.{.not}),
             else => unreachable,
         }
     }
@@ -183,12 +203,44 @@ const Parser = struct {
 
     fn getRule(token_type: TokenType) ParseRule {
         return switch (token_type) {
-            .left_paren => .{ .prefix = grouping, .infix = null, .precedence = .none },
-            .minus => .{ .prefix = unary, .infix = binary, .precedence = .term },
-            .plus => .{ .prefix = null, .infix = binary, .precedence = .term },
-            .slash, .star => .{ .prefix = null, .infix = binary, .precedence = .factor },
-            .number => .{ .prefix = number, .infix = null, .precedence = .none },
-            else => .{ .prefix = null, .infix = null, .precedence = .none },
+            // Single-character tokens.
+            .left_paren => .{
+                .prefix = grouping,
+            },
+            .minus => .{
+                .prefix = unary,
+                .infix = binary,
+                .precedence = .term,
+            },
+            .plus => .{
+                .infix = binary,
+                .precedence = .term,
+            },
+            .slash, .star => .{
+                .infix = binary,
+                .precedence = .factor,
+            },
+            // One or two character tokens.
+            .bang => .{
+                .prefix = unary,
+            },
+            .bang_equal, .equal_equal => .{
+                .infix = binary,
+                .precedence = .equality,
+            },
+            .greater, .greater_equal, .less, .less_equal => .{
+                .infix = binary,
+                .precedence = .comparison,
+            },
+            // Literals.
+            .number => .{
+                .prefix = number,
+            },
+            // Keywords.
+            .false, .true, .nil => .{
+                .prefix = literal,
+            },
+            else => .{},
         };
     }
 

@@ -5,10 +5,17 @@ const ValueArray = @import("value.zig").ValueArray;
 
 pub const OpCode = enum(u8) {
     constant,
+    nil,
+    true,
+    false,
+    equal,
+    greater,
+    less,
     add,
     subtract,
     multiply,
     divide,
+    not,
     negate,
     @"return",
 };
