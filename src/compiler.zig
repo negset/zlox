@@ -248,9 +248,8 @@ const Parser = struct {
 };
 
 pub fn compile(allocator: Allocator, source: []const u8, chunk: *Chunk) Error!void {
-    var scanner = Scanner.init(source);
     var parser = Parser{
-        .scanner = &scanner,
+        .scanner = &.{.source = source},
         .compiling_chunk = chunk,
     };
     try parser.advance();
