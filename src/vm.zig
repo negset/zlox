@@ -29,13 +29,12 @@ pub const VM = struct {
     }
 
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
-        std.debug.print("RuntimeError: " ++ fmt ++ "\n", args);
-
         const offset = self.ip - self.chunk.code.items.ptr - 1;
         const line = self.chunk.lines.items[offset];
-        std.debug.print("[line {d}] in script\n", .{line});
-        self.stack.shrinkRetainingCapacity(0);
+        std.debug.print("[line {d}] RuntimeError.{s}: ", .{ line, @errorName(err) });
+        std.debug.print(fmt ++ "\n", args);
 
+        self.stack.shrinkRetainingCapacity(0);
         return err;
     }
 

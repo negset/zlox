@@ -41,9 +41,7 @@ fn repl(vm: *VM, allocator: std.mem.Allocator) void {
             break;
         };
 
-        vm.interpret(allocator, line) catch |err| {
-            std.debug.print("[{s}]\n", .{@errorName(err)});
-        };
+        vm.interpret(allocator, line) catch {};
     }
 }
 

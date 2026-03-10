@@ -1,4 +1,1 @@
-var drink = "Tea";
-var steep = 4;
-var cool = 2;
-print "hello world";
+!nil != !(-1 + 2 * 3 / 4 - 5 == false) != true

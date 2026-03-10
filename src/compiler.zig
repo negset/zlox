@@ -8,7 +8,7 @@ const TokenType = @import("scanner.zig").TokenType;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 
-pub const Error = error{InvalidSyntax, TooManyConstants} || Allocator.Error;
+pub const Error = error{ InvalidSyntax, TooManyConstants } || Allocator.Error;
 
 const Precedence = enum {
     none,
@@ -47,7 +47,7 @@ const Parser = struct {
     previous: Token = undefined,
 
     fn errorAt(token: Token, err: Error, message: []const u8) Error {
-        std.debug.print("[line {d}] Compile Error ({s})", .{token.line, @tagName(err)});
+        std.debug.print("[line {d}] CompileError.{s}", .{ token.line, @errorName(err) });
 
         switch (token.token_type) {
             .eof => std.debug.print(" at end", .{}),
@@ -248,8 +248,9 @@ const Parser = struct {
 };
 
 pub fn compile(allocator: Allocator, source: []const u8, chunk: *Chunk) Error!void {
+    var scanner = Scanner{ .source = source };
     var parser = Parser{
-        .scanner = &.{.source = source},
+        .scanner = &scanner,
         .compiling_chunk = chunk,
     };
     try parser.advance();

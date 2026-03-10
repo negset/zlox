@@ -28,9 +28,7 @@ pub const ValueArray = struct {
     values: std.ArrayList(Value),
 
     pub fn init() ValueArray {
-        return .{
-            .values = .empty,
-        };
+        return .{ .values = .empty };
     }
 
     pub fn deinit(self: *ValueArray, allocator: Allocator) void {
