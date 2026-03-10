@@ -68,7 +68,7 @@ fn runFile(vm: *VM, allocator: std.mem.Allocator, path: []const u8) void {
     defer allocator.free(source);
 
     vm.interpret(allocator, source) catch |err| switch (err) {
-        error.InvalidCode => std.posix.exit(65),
+        error.InvalidSyntax, error.TooManyConstants => std.process.exit(65),
         error.InvalidOperand => std.process.exit(70),
         error.OutOfMemory => std.process.exit(71),
     };

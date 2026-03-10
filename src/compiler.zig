@@ -8,7 +8,7 @@ const TokenType = @import("scanner.zig").TokenType;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 
-pub const Error = error{InvalidCode} || Allocator.Error;
+pub const Error = error{InvalidSyntax, TooManyConstants} || Allocator.Error;
 
 const Precedence = enum {
     none,
@@ -46,8 +46,8 @@ const Parser = struct {
     current: Token = undefined,
     previous: Token = undefined,
 
-    fn errorAt(token: Token, message: []const u8) Error!void {
-        std.debug.print("[line {d}] Error", .{token.line});
+    fn errorAt(token: Token, err: Error, message: []const u8) Error {
+        std.debug.print("[line {d}] Compile Error ({s})", .{token.line, @tagName(err)});
 
         switch (token.token_type) {
             .eof => std.debug.print(" at end", .{}),
@@ -56,15 +56,15 @@ const Parser = struct {
         }
 
         std.debug.print(": {s}\n", .{message});
-        return Error.InvalidCode;
+        return err;
     }
 
-    fn errorAtPrevious(self: *Parser, message: []const u8) Error!void {
-        try errorAt(self.previous, message);
+    fn errorAtPrevious(self: *Parser, err: Error, message: []const u8) Error {
+        return errorAt(self.previous, err, message);
     }
 
-    fn errorAtCurrent(self: *Parser, message: []const u8) Error!void {
-        try errorAt(self.current, message);
+    fn errorAtCurrent(self: *Parser, err: Error, message: []const u8) Error {
+        return errorAt(self.current, err, message);
     }
 
     pub fn advance(self: *Parser) Error!void {
@@ -74,7 +74,7 @@ const Parser = struct {
             self.current = self.scanner.scanToken();
             if (self.current.token_type != .@"error") break;
 
-            try self.errorAtCurrent(self.current.lexeme);
+            return self.errorAtCurrent(Error.InvalidSyntax, self.current.lexeme);
         }
     }
 
@@ -84,7 +84,7 @@ const Parser = struct {
             return;
         }
 
-        try self.errorAtCurrent(message);
+        return self.errorAtCurrent(Error.InvalidSyntax, message);
     }
 
     fn emitByte(self: *Parser, allocator: Allocator, byte: u8) Error!void {
@@ -111,8 +111,7 @@ const Parser = struct {
         // Make sure the chunk does not contain too many constants,
         // since OpCode.constant uses a single byte for its index operand.
         const byte = std.math.cast(u8, index) orelse {
-            try self.errorAtPrevious("Too many constants in one chunk.");
-            return 0;
+            return self.errorAtPrevious(Error.TooManyConstants, "Too many constants in one chunk.");
         };
         return byte;
     }
@@ -190,8 +189,7 @@ const Parser = struct {
         if (getRule(self.previous.token_type).prefix) |prefix_rule| {
             try prefix_rule(self, allocator);
         } else {
-            try self.errorAtPrevious("Expect expression.");
-            return;
+            return self.errorAtPrevious(Error.InvalidSyntax, "Expect expression.");
         }
 
         while (precedence.le(getRule(self.current.token_type).precedence)) {

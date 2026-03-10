@@ -28,8 +28,8 @@ pub const VM = struct {
         self.stack.deinit(allocator);
     }
 
-    fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError!void {
-        std.debug.print(fmt ++ "\n", args);
+    fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
+        std.debug.print("RuntimeError: " ++ fmt ++ "\n", args);
 
         const offset = self.ip - self.chunk.code.items.ptr - 1;
         const line = self.chunk.lines.items[offset];
@@ -88,7 +88,7 @@ pub const VM = struct {
                 .not => self.push(.{ .bool = isFalsey(self.pop()) }),
                 .negate => switch (self.peek(0)) {
                     .number => self.push(.{ .number = -(self.pop().number) }),
-                    else => try self.runtimeError(error.InvalidOperand, "Operand must be a number.", .{}),
+                    else => return self.runtimeError(error.InvalidOperand, "Operand must be a number.", .{}),
                 },
                 .@"return" => {
                     self.pop().print();
@@ -108,13 +108,13 @@ pub const VM = struct {
         return self.chunk.constants.values.items[readByte(self)];
     }
 
-    fn binaryOp(self: *VM, comptime op: OpCode) RuntimeError!void {
+    fn binaryOp(self: *VM, comptime instruction: OpCode) RuntimeError!void {
         if (self.peek(0) != .number or self.peek(1) != .number) {
-            try self.runtimeError(error.InvalidOperand, "Operands must be numbers.", .{});
+            return self.runtimeError(error.InvalidOperand, "Operands must be numbers.", .{});
         }
         const b = self.pop().number;
         const a = self.pop().number;
-        self.push(switch (op) {
+        self.push(switch (instruction) {
             .add => .{ .number = a + b },
             .subtract => .{ .number = a - b },
             .multiply => .{ .number = a * b },
