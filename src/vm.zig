@@ -12,8 +12,8 @@ pub const RuntimeError = error{InvalidOperand};
 pub const Error = RuntimeError || compiler.Error;
 
 pub const VM = struct {
-    chunk: *Chunk,
-    ip: [*]const u8,
+    chunk: *const Chunk,
+    ip: usize,
     stack: std.ArrayList(Value),
 
     pub fn init(allocator: Allocator) Allocator.Error!VM {
@@ -29,9 +29,8 @@ pub const VM = struct {
     }
 
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
-        const offset = self.ip - self.chunk.code.items.ptr - 1;
-        const line = self.chunk.lines.items[offset];
-        std.debug.print("[line {d}] (runtime) {s}: ", .{ line, @errorName(err) });
+        const line = self.chunk.code.items[self.ip - 1].line;
+        std.debug.print("[line {d}] {s} (runtime): ", .{ line, @errorName(err) });
         std.debug.print(fmt ++ "\n", args);
 
         self.stack.shrinkRetainingCapacity(0);
@@ -54,7 +53,10 @@ pub const VM = struct {
         return value == .nil or (value == .bool and !value.bool);
     }
 
-    fn run(self: *VM) RuntimeError!void {
+    fn run(self: *VM, chunk: *const Chunk) RuntimeError!void {
+        self.chunk = chunk;
+        self.ip = 0;
+
         while (true) {
             if (comptime debug.trace_execution) {
                 std.debug.print("          ", .{});
@@ -64,7 +66,7 @@ pub const VM = struct {
                     std.debug.print(" ]", .{});
                 }
                 std.debug.print("\n", .{});
-                _ = debug.disassembleInstruction(self.chunk, self.ip - self.chunk.code.items.ptr);
+                _ = debug.disassembleInstruction(self.chunk, self.ip);
             }
 
             const instruction: OpCode = @enumFromInt(readByte(self));
@@ -100,11 +102,11 @@ pub const VM = struct {
 
     fn readByte(self: *VM) u8 {
         defer self.ip += 1;
-        return self.ip[0];
+        return self.chunk.code.items[self.ip].byte;
     }
 
     fn readConstant(self: *VM) Value {
-        return self.chunk.constants.values.items[readByte(self)];
+        return self.chunk.constants.items[readByte(self)];
     }
 
     fn binaryOp(self: *VM, comptime instruction: OpCode) RuntimeError!void {
@@ -129,10 +131,6 @@ pub const VM = struct {
         defer chunk.deinit(allocator);
 
         try compiler.compile(allocator, source, &chunk);
-
-        self.chunk = &chunk;
-        self.ip = self.chunk.code.items.ptr;
-
-        try self.run();
+        try self.run(&chunk);
     }
 };

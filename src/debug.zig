@@ -17,13 +17,13 @@ pub fn disassembleChunk(chunk: *const Chunk, name: []const u8) void {
 
 pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
     std.debug.print("{d:0>4} ", .{offset});
-    if (offset > 0 and chunk.lines.items[offset] == chunk.lines.items[offset - 1]) {
+    if (offset > 0 and chunk.code.items[offset].line == chunk.code.items[offset - 1].line) {
         std.debug.print("   | ", .{});
     } else {
-        std.debug.print("{d:>4} ", .{chunk.lines.items[offset]});
+        std.debug.print("{d:>4} ", .{chunk.code.items[offset].line});
     }
 
-    const instruction: OpCode = @enumFromInt(chunk.code.items[offset]);
+    const instruction: OpCode = @enumFromInt(chunk.code.items[offset].byte);
     return switch (instruction) {
         .constant => constantInstruction("constant", chunk, offset),
         else => simpleInstruction(@tagName(instruction), offset),
@@ -31,9 +31,9 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
 }
 
 fn constantInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
-    const constant = chunk.code.items[offset + 1];
+    const constant = chunk.code.items[offset + 1].byte;
     std.debug.print("{s:<16} {d:>4} '", .{ name, constant });
-    chunk.constants.values.items[constant].print();
+    chunk.constants.items[constant].print();
     std.debug.print("'\n", .{});
     return offset + 2;
 }

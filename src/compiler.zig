@@ -47,7 +47,7 @@ const Parser = struct {
     previous: Token = undefined,
 
     fn errorAt(token: Token, err: Error, message: []const u8) Error {
-        std.debug.print("[line {d}] (compile) {s}", .{ token.line, @errorName(err) });
+        std.debug.print("[line {d}] {s} (comptime)", .{ token.line, @errorName(err) });
 
         switch (token.token_type) {
             .eof => std.debug.print(" at end", .{}),
