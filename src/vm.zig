@@ -31,7 +31,7 @@ pub const VM = struct {
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
         const offset = self.ip - self.chunk.code.items.ptr - 1;
         const line = self.chunk.lines.items[offset];
-        std.debug.print("[line {d}] RuntimeError.{s}: ", .{ line, @errorName(err) });
+        std.debug.print("[line {d}] (runtime) {s}: ", .{ line, @errorName(err) });
         std.debug.print(fmt ++ "\n", args);
 
         self.stack.shrinkRetainingCapacity(0);
@@ -56,7 +56,7 @@ pub const VM = struct {
 
     fn run(self: *VM) RuntimeError!void {
         while (true) {
-            if (debug.trace_execution) {
+            if (comptime debug.trace_execution) {
                 std.debug.print("          ", .{});
                 for (self.stack.items) |slot| {
                     std.debug.print("[ ", .{});

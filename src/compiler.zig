@@ -47,7 +47,7 @@ const Parser = struct {
     previous: Token = undefined,
 
     fn errorAt(token: Token, err: Error, message: []const u8) Error {
-        std.debug.print("[line {d}] CompileError.{s}", .{ token.line, @errorName(err) });
+        std.debug.print("[line {d}] (compile) {s}", .{ token.line, @errorName(err) });
 
         switch (token.token_type) {
             .eof => std.debug.print(" at end", .{}),
@@ -126,7 +126,7 @@ const Parser = struct {
 
     pub fn endCompiler(self: *Parser, allocator: Allocator) Error!void {
         try self.emitReturn(allocator);
-        if (debug.print_code) {
+        if (comptime debug.print_code) {
             debug.disassembleChunk(self.compiling_chunk, "code");
         }
     }
