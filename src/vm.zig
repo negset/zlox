@@ -82,7 +82,15 @@ pub const VM = struct {
                 },
                 .greater => try self.binaryOp(.greater),
                 .less => try self.binaryOp(.less),
-                .add => try self.binaryOp(.add),
+                .add => {
+                    if (self.peek(0) == .string and self.peek(1) == .string) {
+                        self.concatenate();
+                    } else if (self.peek(0) == .number and self.peek(1) == .number) {
+                        try self.binaryOp(.add);
+                    } else {
+                        return self.runtimeError(error.InvalidOperand, "Operands must be two numbers or two strings.", .{});
+                    }
+                },
                 .subtract => try self.binaryOp(.subtract),
                 .multiply => try self.binaryOp(.multiply),
                 .divide => try self.binaryOp(.divide),
