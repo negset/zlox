@@ -40,6 +40,25 @@ const ParseRule = struct {
     precedence: Precedence = .none,
 };
 
+const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
+    .left_paren = .{ .prefix = grouping },
+    .minus = .{ .prefix = unary, .infix = binary, .precedence = .term },
+    .plus = .{ .infix = binary, .precedence = .term },
+    .slash = .{ .infix = binary, .precedence = .factor },
+    .star = .{ .infix = binary, .precedence = .factor },
+    .bang = .{ .prefix = unary },
+    .bang_equal = .{ .infix = binary, .precedence = .equality },
+    .equal_equal = .{ .infix = binary, .precedence = .equality },
+    .greater = .{ .infix = binary, .precedence = .comparison },
+    .greater_equal = .{ .infix = binary, .precedence = .comparison },
+    .less = .{ .infix = binary, .precedence = .comparison },
+    .less_equal = .{ .infix = binary, .precedence = .comparison },
+    .number = .{ .prefix = number },
+    .false = .{ .prefix = literal },
+    .true = .{ .prefix = literal },
+    .nil = .{ .prefix = literal },
+});
+
 const Parser = struct {
     scanner: *Scanner,
     compiling_chunk: *Chunk,
@@ -133,7 +152,7 @@ const Parser = struct {
 
     fn binary(self: *Parser, allocator: Allocator) Error!void {
         const operator_type = self.previous.token_type;
-        const rule = getRule(operator_type);
+        const rule = rules.get(operator_type);
         try self.parsePrecedence(allocator, rule.precedence.next());
         try self.emitOps(allocator, switch (operator_type) {
             .minus => &.{.subtract},
@@ -186,60 +205,17 @@ const Parser = struct {
 
     fn parsePrecedence(self: *Parser, allocator: Allocator, precedence: Precedence) Error!void {
         try self.advance();
-        if (getRule(self.previous.token_type).prefix) |prefix_rule| {
+        if (rules.get(self.previous.token_type).prefix) |prefix_rule| {
             try prefix_rule(self, allocator);
         } else {
             return self.errorAtPrevious(Error.InvalidSyntax, "Expect expression.");
         }
 
-        while (precedence.le(getRule(self.current.token_type).precedence)) {
+        while (precedence.le(rules.get(self.current.token_type).precedence)) {
             try self.advance();
-            const infix_rule = getRule(self.previous.token_type).infix;
+            const infix_rule = rules.get(self.previous.token_type).infix;
             try infix_rule.?(self, allocator);
         }
-    }
-
-    fn getRule(token_type: TokenType) ParseRule {
-        return switch (token_type) {
-            // Single-character tokens.
-            .left_paren => .{
-                .prefix = grouping,
-            },
-            .minus => .{
-                .prefix = unary,
-                .infix = binary,
-                .precedence = .term,
-            },
-            .plus => .{
-                .infix = binary,
-                .precedence = .term,
-            },
-            .slash, .star => .{
-                .infix = binary,
-                .precedence = .factor,
-            },
-            // One or two character tokens.
-            .bang => .{
-                .prefix = unary,
-            },
-            .bang_equal, .equal_equal => .{
-                .infix = binary,
-                .precedence = .equality,
-            },
-            .greater, .greater_equal, .less, .less_equal => .{
-                .infix = binary,
-                .precedence = .comparison,
-            },
-            // Literals.
-            .number => .{
-                .prefix = number,
-            },
-            // Keywords.
-            .false, .true, .nil => .{
-                .prefix = literal,
-            },
-            else => .{},
-        };
     }
 
     pub fn expression(self: *Parser, allocator: Allocator) Error!void {
