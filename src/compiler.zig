@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Chunk = @import("chunk.zig").Chunk;
+const ObjString = @import("object.zig").ObjString;
 const OpCode = @import("chunk.zig").OpCode;
 const Scanner = @import("scanner.zig").Scanner;
 const Token = @import("scanner.zig").Token;
@@ -40,31 +41,31 @@ const ParseRule = struct {
     precedence: Precedence = .none,
 };
 
+const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
+    .left_paren = .{ .prefix = Parser.grouping },
+    .minus = .{ .prefix = Parser.unary, .infix = Parser.binary, .precedence = .term },
+    .plus = .{ .infix = Parser.binary, .precedence = .term },
+    .slash = .{ .infix = Parser.binary, .precedence = .factor },
+    .star = .{ .infix = Parser.binary, .precedence = .factor },
+    .bang = .{ .prefix = Parser.unary },
+    .bang_equal = .{ .infix = Parser.binary, .precedence = .equality },
+    .equal_equal = .{ .infix = Parser.binary, .precedence = .equality },
+    .greater = .{ .infix = Parser.binary, .precedence = .comparison },
+    .greater_equal = .{ .infix = Parser.binary, .precedence = .comparison },
+    .less = .{ .infix = Parser.binary, .precedence = .comparison },
+    .less_equal = .{ .infix = Parser.binary, .precedence = .comparison },
+    .string = .{ .prefix = Parser.string },
+    .number = .{ .prefix = Parser.number },
+    .false = .{ .prefix = Parser.literal },
+    .true = .{ .prefix = Parser.literal },
+    .nil = .{ .prefix = Parser.literal },
+});
+
 const Parser = struct {
     scanner: *Scanner,
     compiling_chunk: *Chunk,
     current: Token = undefined,
     previous: Token = undefined,
-
-    const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
-        .left_paren = .{ .prefix = grouping },
-        .minus = .{ .prefix = unary, .infix = binary, .precedence = .term },
-        .plus = .{ .infix = binary, .precedence = .term },
-        .slash = .{ .infix = binary, .precedence = .factor },
-        .star = .{ .infix = binary, .precedence = .factor },
-        .bang = .{ .prefix = unary },
-        .bang_equal = .{ .infix = binary, .precedence = .equality },
-        .equal_equal = .{ .infix = binary, .precedence = .equality },
-        .greater = .{ .infix = binary, .precedence = .comparison },
-        .greater_equal = .{ .infix = binary, .precedence = .comparison },
-        .less = .{ .infix = binary, .precedence = .comparison },
-        .less_equal = .{ .infix = binary, .precedence = .comparison },
-        .string = .{ .infix = string },
-        .number = .{ .prefix = number },
-        .false = .{ .prefix = literal },
-        .true = .{ .prefix = literal },
-        .nil = .{ .prefix = literal },
-    });
 
     fn errorAt(token: Token, err: Error, message: []const u8) Error {
         std.debug.print("[line {d}] {s} (comptime)", .{ token.line, @errorName(err) });
@@ -192,8 +193,8 @@ const Parser = struct {
 
     fn string(self: *Parser, allocator: Allocator) Error!void {
         // Trim double quotes.
-        const string = self.previous.lexeme[1 : self.previous.lexeme.len - 2];
-        const obj_string = try ObjString.create(allocator, string);
+        const s = self.previous.lexeme[1 .. self.previous.lexeme.len - 1];
+        const obj_string = try ObjString.createByCopy(allocator, s);
         try self.emitConstant(allocator, .{ .obj = &obj_string.obj });
     }
 

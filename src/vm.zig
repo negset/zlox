@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Chunk = @import("chunk.zig").Chunk;
+const ObjString = @import("object.zig").ObjString;
 const OpCode = @import("chunk.zig").OpCode;
 const compiler = @import("compiler.zig");
 const Value = @import("value.zig").Value;
@@ -9,7 +10,7 @@ const debug = @import("debug.zig");
 const stack_max: usize = 256;
 
 pub const RuntimeError = error{InvalidOperand};
-pub const Error = RuntimeError || compiler.Error;
+pub const Error = RuntimeError || compiler.Error || Allocator.Error;
 
 pub const VM = struct {
     chunk: *const Chunk,
@@ -49,11 +50,16 @@ pub const VM = struct {
         return self.stack.items[self.stack.items.len - 1 - distance];
     }
 
-    fn isFalsey(value: Value) bool {
-        return value == .nil or (value == .bool and !value.bool);
+    fn concatenate(self: *VM, allocator: Allocator) Allocator.Error!void {
+        const b = self.pop().obj.As(ObjString);
+        const a = self.pop().obj.As(ObjString);
+        const string = try std.mem.concat(allocator, u8, &.{ a.string, b.string });
+
+        const result = try ObjString.createByTake(allocator, string);
+        self.push(Value{ .obj = &result.obj });
     }
 
-    fn run(self: *VM, chunk: *const Chunk) RuntimeError!void {
+    fn run(self: *VM, allocator: Allocator, chunk: *const Chunk) Error!void {
         self.chunk = chunk;
         self.ip = 0;
 
@@ -83,8 +89,8 @@ pub const VM = struct {
                 .greater => try self.binaryOp(.greater),
                 .less => try self.binaryOp(.less),
                 .add => {
-                    if (self.peek(0) == .string and self.peek(1) == .string) {
-                        self.concatenate();
+                    if (self.peek(0).isObjType(.string) and self.peek(1).isObjType(.string)) {
+                        try self.concatenate(allocator);
                     } else if (self.peek(0) == .number and self.peek(1) == .number) {
                         try self.binaryOp(.add);
                     } else {
@@ -94,7 +100,7 @@ pub const VM = struct {
                 .subtract => try self.binaryOp(.subtract),
                 .multiply => try self.binaryOp(.multiply),
                 .divide => try self.binaryOp(.divide),
-                .not => self.push(.{ .bool = isFalsey(self.pop()) }),
+                .not => self.push(.{ .bool = self.pop().isFalsey() }),
                 .negate => switch (self.peek(0)) {
                     .number => self.push(.{ .number = -(self.pop().number) }),
                     else => return self.runtimeError(error.InvalidOperand, "Operand must be a number.", .{}),
@@ -139,6 +145,6 @@ pub const VM = struct {
         defer chunk.deinit(allocator);
 
         try compiler.compile(allocator, source, &chunk);
-        try self.run(&chunk);
+        try self.run(allocator, &chunk);
     }
 };

@@ -1,12 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Obj = @import("object.zig").Obj;
+const ObjType = @import("object.zig").ObjType;
+const ObjString = @import("object.zig").ObjString;
 
 pub const Value = union(enum) {
     bool: bool,
     nil: void,
     number: f64,
-    obj: *const Obj,
+    obj: *Obj,
 
     pub fn print(self: Value) void {
         switch (self) {
@@ -31,10 +33,14 @@ pub const Value = union(enum) {
         };
     }
 
+    pub fn isFalsey(self: Value) bool {
+        return self == .nil or (self == .bool and !self.bool);
+    }
+
     pub fn isObjType(self: Value, obj_type: ObjType) bool {
         return switch (self) {
             .obj => |obj| obj.obj_type == obj_type,
             else => false,
-        }
+        };
     }
 };
