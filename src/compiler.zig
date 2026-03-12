@@ -40,30 +40,31 @@ const ParseRule = struct {
     precedence: Precedence = .none,
 };
 
-const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
-    .left_paren = .{ .prefix = grouping },
-    .minus = .{ .prefix = unary, .infix = binary, .precedence = .term },
-    .plus = .{ .infix = binary, .precedence = .term },
-    .slash = .{ .infix = binary, .precedence = .factor },
-    .star = .{ .infix = binary, .precedence = .factor },
-    .bang = .{ .prefix = unary },
-    .bang_equal = .{ .infix = binary, .precedence = .equality },
-    .equal_equal = .{ .infix = binary, .precedence = .equality },
-    .greater = .{ .infix = binary, .precedence = .comparison },
-    .greater_equal = .{ .infix = binary, .precedence = .comparison },
-    .less = .{ .infix = binary, .precedence = .comparison },
-    .less_equal = .{ .infix = binary, .precedence = .comparison },
-    .number = .{ .prefix = number },
-    .false = .{ .prefix = literal },
-    .true = .{ .prefix = literal },
-    .nil = .{ .prefix = literal },
-});
-
 const Parser = struct {
     scanner: *Scanner,
     compiling_chunk: *Chunk,
     current: Token = undefined,
     previous: Token = undefined,
+
+    const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
+        .left_paren = .{ .prefix = grouping },
+        .minus = .{ .prefix = unary, .infix = binary, .precedence = .term },
+        .plus = .{ .infix = binary, .precedence = .term },
+        .slash = .{ .infix = binary, .precedence = .factor },
+        .star = .{ .infix = binary, .precedence = .factor },
+        .bang = .{ .prefix = unary },
+        .bang_equal = .{ .infix = binary, .precedence = .equality },
+        .equal_equal = .{ .infix = binary, .precedence = .equality },
+        .greater = .{ .infix = binary, .precedence = .comparison },
+        .greater_equal = .{ .infix = binary, .precedence = .comparison },
+        .less = .{ .infix = binary, .precedence = .comparison },
+        .less_equal = .{ .infix = binary, .precedence = .comparison },
+        .string = .{ .infix = string },
+        .number = .{ .prefix = number },
+        .false = .{ .prefix = literal },
+        .true = .{ .prefix = literal },
+        .nil = .{ .prefix = literal },
+    });
 
     fn errorAt(token: Token, err: Error, message: []const u8) Error {
         std.debug.print("[line {d}] {s} (comptime)", .{ token.line, @errorName(err) });
@@ -187,6 +188,13 @@ const Parser = struct {
         const value = std.fmt.parseFloat(f64, self.previous.lexeme) catch
             @panic("Invalid number.");
         try self.emitConstant(allocator, .{ .number = value });
+    }
+
+    fn string(self: *Parser, allocator: Allocator) Error!void {
+        // Trim double quotes.
+        const string = self.previous.lexeme[1 : self.previous.lexeme.len - 2];
+        const obj_string = try ObjString.create(allocator, string);
+        try self.emitConstant(allocator, .{ .obj = &obj_string.obj });
     }
 
     fn unary(self: *Parser, allocator: Allocator) Error!void {
