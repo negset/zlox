@@ -1,32 +1,37 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Chunk = @import("chunk.zig").Chunk;
-const ObjString = @import("object.zig").ObjString;
 const OpCode = @import("chunk.zig").OpCode;
 const compiler = @import("compiler.zig");
+const GC = @import("memory.zig").GC;
+const Obj = @import("object.zig").Obj;
+const ObjString = @import("object.zig").ObjString;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 
 const stack_max: usize = 256;
 
-pub const RuntimeError = error{InvalidOperand};
-pub const Error = RuntimeError || compiler.Error || Allocator.Error;
+pub const RuntimeError = error{InvalidOperand} || Allocator.Error;
+pub const Error = RuntimeError || compiler.Error;
 
 pub const VM = struct {
     chunk: *const Chunk,
     ip: usize,
     stack: std.ArrayList(Value),
+    gc: GC,
 
     pub fn init(allocator: Allocator) Allocator.Error!VM {
         return .{
             .chunk = undefined,
             .ip = undefined,
             .stack = try .initCapacity(allocator, stack_max),
+            .gc = .init,
         };
     }
 
     pub fn deinit(self: *VM, allocator: Allocator) void {
         self.stack.deinit(allocator);
+        self.gc.freeObjects(allocator);
     }
 
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
@@ -55,11 +60,11 @@ pub const VM = struct {
         const a = self.pop().obj.As(ObjString);
         const string = try std.mem.concat(allocator, u8, &.{ a.string, b.string });
 
-        const result = try ObjString.createByTake(allocator, string);
+        const result = try ObjString.createByTake(allocator, &self.gc, string);
         self.push(Value{ .obj = &result.obj });
     }
 
-    fn run(self: *VM, allocator: Allocator, chunk: *const Chunk) Error!void {
+    fn run(self: *VM, allocator: Allocator, chunk: *const Chunk) RuntimeError!void {
         self.chunk = chunk;
         self.ip = 0;
 
@@ -144,7 +149,7 @@ pub const VM = struct {
         var chunk = Chunk.init();
         defer chunk.deinit(allocator);
 
-        try compiler.compile(allocator, source, &chunk);
+        try compiler.compile(allocator, &self.gc, source, &chunk);
         try self.run(allocator, &chunk);
     }
 };

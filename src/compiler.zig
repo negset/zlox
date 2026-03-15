@@ -1,8 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Chunk = @import("chunk.zig").Chunk;
-const ObjString = @import("object.zig").ObjString;
 const OpCode = @import("chunk.zig").OpCode;
+const GC = @import("memory.zig").GC;
+const ObjString = @import("object.zig").ObjString;
 const Scanner = @import("scanner.zig").Scanner;
 const Token = @import("scanner.zig").Token;
 const TokenType = @import("scanner.zig").TokenType;
@@ -66,6 +67,7 @@ const Parser = struct {
     compiling_chunk: *Chunk,
     current: Token = undefined,
     previous: Token = undefined,
+    gc: *GC,
 
     fn errorAt(token: Token, err: Error, message: []const u8) Error {
         std.debug.print("[line {d}] {s} (comptime)", .{ token.line, @errorName(err) });
@@ -193,8 +195,8 @@ const Parser = struct {
 
     fn string(self: *Parser, allocator: Allocator) Error!void {
         // Trim double quotes.
-        const s = self.previous.lexeme[1 .. self.previous.lexeme.len - 1];
-        const obj_string = try ObjString.createByCopy(allocator, s);
+        const str = self.previous.lexeme[1 .. self.previous.lexeme.len - 1];
+        const obj_string = try ObjString.createByCopy(allocator, self.gc, str);
         try self.emitConstant(allocator, .{ .obj = &obj_string.obj });
     }
 
@@ -232,11 +234,12 @@ const Parser = struct {
     }
 };
 
-pub fn compile(allocator: Allocator, source: []const u8, chunk: *Chunk) Error!void {
+pub fn compile(allocator: Allocator, gc: *GC, source: []const u8, chunk: *Chunk) Error!void {
     var scanner = Scanner{ .source = source };
     var parser = Parser{
         .scanner = &scanner,
         .compiling_chunk = chunk,
+        .gc = gc,
     };
     try parser.advance();
     try parser.expression(allocator);

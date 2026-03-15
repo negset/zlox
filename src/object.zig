@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const GC = @import("memory.zig").GC;
 const Value = @import("value.zig").Value;
 
 pub const ObjType = enum {
@@ -8,6 +9,7 @@ pub const ObjType = enum {
 
 pub const Obj = struct {
     obj_type: ObjType,
+    next: ?*Obj,
 
     pub fn As(self: *const Obj, T: type) *const T {
         return @alignCast(@fieldParentPtr("obj", self));
@@ -24,19 +26,18 @@ pub const ObjString = struct {
     obj: Obj,
     string: []const u8,
 
-    fn create(allocator: Allocator, string: []const u8) Allocator.Error!*ObjString {
-        const obj_string = try allocator.create(ObjString);
-        obj_string.obj.obj_type = .string;
+    fn create(allocator: Allocator, gc: *GC, string: []const u8) Allocator.Error!*ObjString {
+        const obj_string = try gc.createObject(allocator, ObjString);
         obj_string.string = string;
         return obj_string;
     }
 
-    pub fn createByCopy(allocator: Allocator, string: []const u8) Allocator.Error!*ObjString {
+    pub fn createByCopy(allocator: Allocator, gc: *GC, string: []const u8) Allocator.Error!*ObjString {
         const copied = try allocator.dupe(u8, string);
-        return create(allocator, copied);
+        return create(allocator, gc, copied);
     }
 
-    pub fn createByTake(allocator: Allocator, string: []const u8) Allocator.Error!*ObjString {
-        return create(allocator, string);
+    pub fn createByTake(allocator: Allocator, gc: *GC, string: []const u8) Allocator.Error!*ObjString {
+        return create(allocator, gc, string);
     }
 };

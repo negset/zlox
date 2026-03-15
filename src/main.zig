@@ -1,8 +1,9 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
-const VM = @import("vm.zig").VM;
 const Value = @import("value.zig").Value;
+const VM = @import("vm.zig").VM;
 const debug = @import("debug.zig");
 
 pub fn main() !void {
@@ -20,8 +21,8 @@ pub fn main() !void {
     defer vm.deinit(allocator);
 
     switch (args.len) {
-        1 => repl(&vm, allocator),
-        2 => runFile(&vm, allocator, args[1]),
+        1 => repl(allocator, &vm),
+        2 => runFile(allocator, &vm, args[1]),
         else => {
             std.debug.print("Usage: zlox [path]\n", .{});
             std.process.exit(64);
@@ -29,7 +30,7 @@ pub fn main() !void {
     }
 }
 
-fn repl(vm: *VM, allocator: std.mem.Allocator) void {
+fn repl(allocator: Allocator, vm: *VM) void {
     var stdin_buf: [1024]u8 = undefined;
     var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
     const stdin = &stdin_reader.interface;
@@ -45,7 +46,7 @@ fn repl(vm: *VM, allocator: std.mem.Allocator) void {
     }
 }
 
-fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+fn readFile(allocator: Allocator, path: []const u8) ![]const u8 {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
@@ -58,7 +59,7 @@ fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     return contents;
 }
 
-fn runFile(vm: *VM, allocator: std.mem.Allocator, path: []const u8) void {
+fn runFile(allocator: Allocator, vm: *VM, path: []const u8) void {
     const source = readFile(allocator, path) catch |err| {
         std.debug.print("Could not read file \"{s}\": {}", .{ path, err });
         std.process.exit(74);
