@@ -11,13 +11,13 @@ pub const Obj = struct {
     obj_type: ObjType,
     next: ?*Obj,
 
-    pub fn As(self: *const Obj, T: type) *const T {
+    pub fn as(self: *const Obj, comptime T: type) *const T {
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
     pub fn print(self: *const Obj) void {
         switch (self.obj_type) {
-            .string => std.debug.print("{s}", .{self.As(ObjString).string}),
+            .string => std.debug.print("{s}", .{self.as(ObjString).string}),
         }
     }
 };

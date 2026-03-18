@@ -56,9 +56,9 @@ pub const VM = struct {
     }
 
     fn concatenate(self: *VM, allocator: Allocator) Allocator.Error!void {
-        const b = self.pop().obj.As(ObjString);
-        const a = self.pop().obj.As(ObjString);
-        const string = try std.mem.concat(allocator, u8, &.{ a.string, b.string });
+        const b = self.pop().obj.as(ObjString).string;
+        const a = self.pop().obj.as(ObjString).string;
+        const string = try std.mem.concat(allocator, u8, &.{ a, b });
 
         const result = try ObjString.createByTake(allocator, &self.gc, string);
         self.push(Value{ .obj = &result.obj });
