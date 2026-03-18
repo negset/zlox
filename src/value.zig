@@ -25,11 +25,7 @@ pub const Value = union(enum) {
             .bool => |b| b == other.bool,
             .nil => true,
             .number => |f| f == other.number,
-            .obj => |o| {
-                const a = o.as(ObjString).string;
-                const b = other.obj.as(ObjString).string;
-                return a.len == b.len and std.mem.eql(u8, a, b);
-            },
+            .obj => |o| o == other.obj,
         };
     }
 

@@ -31,7 +31,7 @@ pub const VM = struct {
 
     pub fn deinit(self: *VM, allocator: Allocator) void {
         self.stack.deinit(allocator);
-        self.gc.freeObjects(allocator);
+        self.gc.deinit(allocator);
     }
 
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
