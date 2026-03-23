@@ -7,6 +7,7 @@ pub const OpCode = enum(u8) {
     nil,
     true,
     false,
+    pop,
     equal,
     greater,
     less,
@@ -16,6 +17,7 @@ pub const OpCode = enum(u8) {
     divide,
     not,
     negate,
+    print,
     @"return",
 };
 

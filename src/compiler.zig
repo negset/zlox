@@ -110,6 +110,16 @@ const Parser = struct {
         return self.errorAtCurrent(Error.InvalidSyntax, message);
     }
 
+    fn check(self: *Parser, token_type: TokenType) bool {
+        return self.current.token_type == token_type;
+    }
+
+    pub fn match(self: *Parser, token_type: TokenType) Error!bool {
+        if (!self.check(token_type)) return false;
+        try self.advance();
+        return true;
+    }
+
     fn emitByte(self: *Parser, allocator: Allocator, byte: u8) Error!void {
         try self.compiling_chunk.write(allocator, byte, self.previous.line);
     }
@@ -229,8 +239,52 @@ const Parser = struct {
         }
     }
 
-    pub fn expression(self: *Parser, allocator: Allocator) Error!void {
+    fn expression(self: *Parser, allocator: Allocator) Error!void {
         try self.parsePrecedence(allocator, .assignment);
+    }
+
+    pub fn declaration(self: *Parser, allocator: Allocator) Error!void {
+        try self.statement(allocator);
+    }
+
+    fn statement(self: *Parser, allocator: Allocator) Error!void {
+        if (try self.match(.print)) {
+            try self.printStatement(allocator);
+        } else {
+            try expressionStatement(self, allocator);
+        }
+    }
+
+    fn printStatement(self: *Parser, allocator: Allocator) Error!void {
+        try self.expression(allocator);
+        try self.consume(.semicolon, "Expect ';' after value.");
+        try self.emitOps(allocator, &.{.print});
+    }
+
+    fn expressionStatement(self: *Parser, allocator: Allocator) Error!void {
+        try self.expression(allocator);
+        try self.consume(.semicolon, "Expect ';' after expression.");
+        try self.emitOps(allocator, &.{.pop});
+    }
+
+    fn synchronize(self: *Parser) Error!void {
+        while (self.current.token_type != .eof) {
+            if (self.previous.token_type == .semicolon) return;
+            switch (self.current.token_type) {
+                .class,
+                .fun,
+                .@"var",
+                .@"for",
+                .@"if",
+                .@"while",
+                .print,
+                .@"return",
+                => return,
+                else => {}, // Do nothing.
+            }
+
+            try self.advance();
+        }
     }
 };
 
@@ -241,8 +295,18 @@ pub fn compile(allocator: Allocator, gc: *GC, source: []const u8, chunk: *Chunk)
         .compiling_chunk = chunk,
         .gc = gc,
     };
-    try parser.advance();
-    try parser.expression(allocator);
-    try parser.consume(.eof, "Expect end of expression.");
-    try parser.endCompiler(allocator);
+
+    var result: Error!void = {};
+    result = parser.advance();
+
+    while (!try parser.match(.eof)) {
+        parser.declaration(allocator) catch |err| {
+            try parser.synchronize();
+            result = err;
+        };
+    }
+
+    result = parser.endCompiler(allocator);
+
+    return result;
 }

@@ -86,6 +86,7 @@ pub const VM = struct {
                 .nil => self.push(.{ .nil = {} }),
                 .true => self.push(.{ .bool = true }),
                 .false => self.push(.{ .bool = false }),
+                .pop => _ = self.pop(),
                 .equal => {
                     const b = self.pop();
                     const a = self.pop();
@@ -110,9 +111,12 @@ pub const VM = struct {
                     .number => self.push(.{ .number = -(self.pop().number) }),
                     else => return self.runtimeError(error.InvalidOperand, "Operand must be a number.", .{}),
                 },
-                .@"return" => {
+                .print => {
                     self.pop().print();
                     std.debug.print("\n", .{});
+                },
+                .@"return" => {
+                    // Exit interpreter.
                     return;
                 },
             }
