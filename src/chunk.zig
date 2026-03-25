@@ -8,6 +8,9 @@ pub const OpCode = enum(u8) {
     true,
     false,
     pop,
+    get_global,
+    define_global,
+    set_global,
     equal,
     greater,
     less,
@@ -25,12 +28,10 @@ pub const Chunk = struct {
     code: std.ArrayList(struct { byte: u8, line: u32 }),
     constants: std.ArrayList(Value),
 
-    pub fn init() Chunk {
-        return .{
-            .code = .empty,
-            .constants = .empty,
-        };
-    }
+    pub const empty = Chunk{
+        .code = .empty,
+        .constants = .empty,
+    };
 
     pub fn deinit(self: *Chunk, allocator: Allocator) void {
         self.code.deinit(allocator);

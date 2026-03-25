@@ -8,7 +8,7 @@ pub const Value = union(enum) {
     bool: bool,
     nil: void,
     number: f64,
-    obj: *Obj,
+    obj: *const Obj,
 
     pub fn print(self: Value) void {
         switch (self) {

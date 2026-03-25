@@ -1,1 +1,5 @@
-!nil != !(-1 + 2 * 3 / (4 - 5) == false) != true
+var breakfast = "beignets";
+var beverage = "cafe au lait";
+breakfast = "beignets with " + beverage;
+
+print breakfast;

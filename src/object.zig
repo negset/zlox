@@ -27,7 +27,7 @@ pub const ObjString = struct {
     string: []const u8,
     hash: u64,
 
-    fn create(allocator: Allocator, gc: *GC, string: []const u8, hash: u64) Allocator.Error!*ObjString {
+    fn create(allocator: Allocator, gc: *GC, string: []const u8, hash: u64) Allocator.Error!*const @This() {
         const obj_string = try gc.createObject(allocator, ObjString);
         obj_string.string = string;
         obj_string.hash = hash;
@@ -35,7 +35,7 @@ pub const ObjString = struct {
         return obj_string;
     }
 
-    pub fn createByCopy(allocator: Allocator, gc: *GC, string: []const u8) Allocator.Error!*ObjString {
+    pub fn createByCopy(allocator: Allocator, gc: *GC, string: []const u8) Allocator.Error!*const @This() {
         const hash = std.hash.Fnv1a_64.hash(string);
         if (gc.findString(string, hash)) |interned| {
             return interned;
@@ -45,7 +45,7 @@ pub const ObjString = struct {
         return create(allocator, gc, copied, hash);
     }
 
-    pub fn createByTake(allocator: Allocator, gc: *GC, string: []const u8) Allocator.Error!*ObjString {
+    pub fn createByTake(allocator: Allocator, gc: *GC, string: []const u8) Allocator.Error!*const @This() {
         const hash = std.hash.Fnv1a_64.hash(string);
         if (gc.findString(string, hash)) |interned| {
             allocator.free(string);
@@ -57,11 +57,11 @@ pub const ObjString = struct {
 };
 
 pub const ObjStringContext = struct {
-    pub fn hash(_: @This(), obj_string: *ObjString) u64 {
+    pub fn hash(_: @This(), obj_string: *const ObjString) u64 {
         return obj_string.hash;
     }
 
-    pub fn eql(_: @This(), a: *ObjString, b: *ObjString) bool {
+    pub fn eql(_: @This(), a: *const ObjString, b: *const ObjString) bool {
         if (a == b) return true;
         if (a.string.len != b.string.len) return false;
         return std.mem.eql(u8, a.string, b.string);

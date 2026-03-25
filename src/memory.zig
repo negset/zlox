@@ -5,17 +5,22 @@ const ObjString = @import("object.zig").ObjString;
 const ObjStringContext = @import("object.zig").ObjStringContext;
 const Value = @import("value.zig").Value;
 
+const Table = std.HashMapUnmanaged(*const ObjString, Value, ObjStringContext, 75);
+
 pub const GC = struct {
-    strings: std.HashMapUnmanaged(*ObjString, Value, ObjStringContext, 75),
+    globals: Table,
+    strings: Table,
     objects: ?*Obj,
 
     pub const init = GC{
+        .globals = .empty,
         .strings = .empty,
         .objects = null,
     };
 
     pub fn deinit(self: *GC, allocator: Allocator) void {
         self.freeObjects(allocator);
+        self.globals.deinit(allocator);
         self.strings.deinit(allocator);
     }
 
@@ -49,7 +54,7 @@ pub const GC = struct {
         }
     }
 
-    pub fn findString(self: *GC, string: []const u8, hash: u64) ?*ObjString {
+    pub fn findString(self: *GC, string: []const u8, hash: u64) ?*const ObjString {
         var obj_string = ObjString{
             .obj = undefined,
             .string = string,

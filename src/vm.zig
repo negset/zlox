@@ -80,13 +80,40 @@ pub const VM = struct {
                 _ = debug.disassembleInstruction(self.chunk, self.ip);
             }
 
-            const instruction: OpCode = @enumFromInt(readByte(self));
+            const instruction: OpCode = @enumFromInt(self.readByte());
             switch (instruction) {
-                .constant => self.push(readConstant(self)),
+                .constant => self.push(self.readConstant()),
                 .nil => self.push(.{ .nil = {} }),
                 .true => self.push(.{ .bool = true }),
                 .false => self.push(.{ .bool = false }),
                 .pop => _ = self.pop(),
+                .get_global => {
+                    const name = self.readString();
+                    if (self.gc.globals.get(name)) |value| {
+                        self.push(value);
+                    } else return self.runtimeError(
+                        error.InvalidOperand,
+                        "Undefined variable '{s}'.",
+                        .{name.string},
+                    );
+                },
+                .define_global => {
+                    const name = self.readString();
+                    // To avoid GC, pop value after put it to the table.
+                    try self.gc.globals.put(allocator, name, self.peek(0));
+                    _ = self.pop();
+                },
+                .set_global => {
+                    const name = self.readString();
+                    if (self.gc.globals.getPtr(name)) |ptr| {
+                        // If exists, overwrite it.
+                        ptr.* = self.peek(0);
+                    } else return self.runtimeError(
+                        error.InvalidOperand,
+                        "Undefined variable '{s}'.",
+                        .{name.string},
+                    );
+                },
                 .equal => {
                     const b = self.pop();
                     const a = self.pop();
@@ -99,9 +126,11 @@ pub const VM = struct {
                         try self.concatenate(allocator);
                     } else if (self.peek(0) == .number and self.peek(1) == .number) {
                         try self.binaryOp(.add);
-                    } else {
-                        return self.runtimeError(error.InvalidOperand, "Operands must be two numbers or two strings.", .{});
-                    }
+                    } else return self.runtimeError(
+                        error.InvalidOperand,
+                        "Operands must be two numbers or two strings.",
+                        .{},
+                    );
                 },
                 .subtract => try self.binaryOp(.subtract),
                 .multiply => try self.binaryOp(.multiply),
@@ -132,6 +161,10 @@ pub const VM = struct {
         return self.chunk.constants.items[readByte(self)];
     }
 
+    fn readString(self: *VM) *const ObjString {
+        return self.readConstant().obj.as(ObjString);
+    }
+
     fn binaryOp(self: *VM, comptime instruction: OpCode) RuntimeError!void {
         if (self.peek(0) != .number or self.peek(1) != .number) {
             return self.runtimeError(error.InvalidOperand, "Operands must be numbers.", .{});
@@ -150,7 +183,7 @@ pub const VM = struct {
     }
 
     pub fn interpret(self: *VM, allocator: Allocator, source: []const u8) Error!void {
-        var chunk = Chunk.init();
+        var chunk = Chunk.empty;
         defer chunk.deinit(allocator);
 
         try compiler.compile(allocator, &self.gc, source, &chunk);

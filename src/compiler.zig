@@ -34,7 +34,7 @@ const Precedence = enum {
     }
 };
 
-const ParseFn = *const fn (*Parser, Allocator) Error!void;
+const ParseFn = *const fn (*Parser, Allocator, bool) Error!void;
 
 const ParseRule = struct {
     prefix: ?ParseFn = null,
@@ -55,6 +55,7 @@ const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
     .greater_equal = .{ .infix = Parser.binary, .precedence = .comparison },
     .less = .{ .infix = Parser.binary, .precedence = .comparison },
     .less_equal = .{ .infix = Parser.binary, .precedence = .comparison },
+    .identifier = .{ .prefix = Parser.variable },
     .string = .{ .prefix = Parser.string },
     .number = .{ .prefix = Parser.number },
     .false = .{ .prefix = Parser.literal },
@@ -97,7 +98,7 @@ const Parser = struct {
             self.current = self.scanner.scanToken();
             if (self.current.token_type != .@"error") break;
 
-            return self.errorAtCurrent(Error.InvalidSyntax, self.current.lexeme);
+            return self.errorAtCurrent(error.InvalidSyntax, self.current.lexeme);
         }
     }
 
@@ -107,7 +108,7 @@ const Parser = struct {
             return;
         }
 
-        return self.errorAtCurrent(Error.InvalidSyntax, message);
+        return self.errorAtCurrent(error.InvalidSyntax, message);
     }
 
     fn check(self: *Parser, token_type: TokenType) bool {
@@ -144,7 +145,7 @@ const Parser = struct {
         // Make sure the chunk does not contain too many constants,
         // since OpCode.constant uses a single byte for its index operand.
         const byte = std.math.cast(u8, index) orelse {
-            return self.errorAtPrevious(Error.TooManyConstants, "Too many constants in one chunk.");
+            return self.errorAtPrevious(error.TooManyConstants, "Too many constants in one chunk.");
         };
         return byte;
     }
@@ -164,7 +165,7 @@ const Parser = struct {
         }
     }
 
-    fn binary(self: *Parser, allocator: Allocator) Error!void {
+    fn binary(self: *Parser, allocator: Allocator, _: bool) Error!void {
         const operator_type = self.previous.token_type;
         const rule = rules.get(operator_type);
         try self.parsePrecedence(allocator, rule.precedence.next());
@@ -183,7 +184,7 @@ const Parser = struct {
         });
     }
 
-    fn literal(self: *Parser, allocator: Allocator) Error!void {
+    fn literal(self: *Parser, allocator: Allocator, _: bool) Error!void {
         try self.emitOps(allocator, switch (self.previous.token_type) {
             .false => &.{.false},
             .nil => &.{.nil},
@@ -192,25 +193,47 @@ const Parser = struct {
         });
     }
 
-    fn grouping(self: *Parser, allocator: Allocator) Error!void {
+    fn grouping(self: *Parser, allocator: Allocator, _: bool) Error!void {
         try self.expression(allocator);
         try self.consume(.right_paren, "Expect ')' after expression.");
     }
 
-    fn number(self: *Parser, allocator: Allocator) Error!void {
+    fn number(self: *Parser, allocator: Allocator, _: bool) Error!void {
         const value = std.fmt.parseFloat(f64, self.previous.lexeme) catch
             @panic("Invalid number.");
         try self.emitConstant(allocator, .{ .number = value });
     }
 
-    fn string(self: *Parser, allocator: Allocator) Error!void {
+    fn string(self: *Parser, allocator: Allocator, _: bool) Error!void {
         // Trim double quotes.
         const str = self.previous.lexeme[1 .. self.previous.lexeme.len - 1];
         const obj_string = try ObjString.createByCopy(allocator, self.gc, str);
         try self.emitConstant(allocator, .{ .obj = &obj_string.obj });
     }
 
-    fn unary(self: *Parser, allocator: Allocator) Error!void {
+    fn namedVariable(self: *Parser, allocator: Allocator, can_assign: bool) Error!void {
+        const arg = try self.identifierConstant(allocator, self.previous);
+        if (can_assign and try self.match(.equal)) {
+            try self.expression(allocator);
+            try self.emitBytes(
+                allocator,
+                @intFromEnum(OpCode.set_global),
+                arg,
+            );
+        } else {
+            try self.emitBytes(
+                allocator,
+                @intFromEnum(OpCode.get_global),
+                arg,
+            );
+        }
+    }
+
+    fn variable(self: *Parser, allocator: Allocator, can_assign: bool) Error!void {
+        try self.namedVariable(allocator, can_assign);
+    }
+
+    fn unary(self: *Parser, allocator: Allocator, _: bool) Error!void {
         const operator_type = self.previous.token_type;
 
         // Compile the operand.
@@ -226,32 +249,67 @@ const Parser = struct {
 
     fn parsePrecedence(self: *Parser, allocator: Allocator, precedence: Precedence) Error!void {
         try self.advance();
+
+        const can_assign = precedence.le(.assignment);
+
         if (rules.get(self.previous.token_type).prefix) |prefix_rule| {
-            try prefix_rule(self, allocator);
+            try prefix_rule(self, allocator, can_assign);
         } else {
-            return self.errorAtPrevious(Error.InvalidSyntax, "Expect expression.");
+            return self.errorAtPrevious(error.InvalidSyntax, "Expect expression.");
         }
 
         while (precedence.le(rules.get(self.current.token_type).precedence)) {
             try self.advance();
             const infix_rule = rules.get(self.previous.token_type).infix;
-            try infix_rule.?(self, allocator);
+            try infix_rule.?(self, allocator, can_assign);
         }
+
+        if (can_assign and try self.match(.equal)) {
+            return self.errorAtPrevious(error.InvalidSyntax, "Invalid assignment target.");
+        }
+    }
+
+    fn identifierConstant(self: *Parser, allocator: Allocator, name: Token) Error!u8 {
+        const obj_string = try ObjString.createByCopy(allocator, self.gc, name.lexeme);
+        return self.makeConstant(allocator, .{ .obj = &obj_string.obj });
+    }
+
+    fn parseVariable(self: *Parser, allocator: Allocator, message: []const u8) Error!u8 {
+        try self.consume(.identifier, message);
+        return self.identifierConstant(allocator, self.previous);
+    }
+
+    fn defineVariable(self: *Parser, allocator: Allocator, global: u8) Error!void {
+        try self.emitBytes(
+            allocator,
+            @intFromEnum(OpCode.define_global),
+            global,
+        );
     }
 
     fn expression(self: *Parser, allocator: Allocator) Error!void {
         try self.parsePrecedence(allocator, .assignment);
     }
 
-    pub fn declaration(self: *Parser, allocator: Allocator) Error!void {
-        try self.statement(allocator);
+    fn varDeclaration(self: *Parser, allocator: Allocator) Error!void {
+        const global = try self.parseVariable(allocator, "Expect variable name");
+
+        if (try self.match(.equal)) {
+            try self.expression(allocator);
+        } else {
+            // Implicit initialization
+            try self.emitOps(allocator, &.{.nil});
+        }
+        try self.consume(.semicolon, "Expect ';' after variable declaration.");
+
+        try self.defineVariable(allocator, global);
     }
 
-    fn statement(self: *Parser, allocator: Allocator) Error!void {
-        if (try self.match(.print)) {
-            try self.printStatement(allocator);
+    pub fn declaration(self: *Parser, allocator: Allocator) Error!void {
+        if (try self.match(.@"var")) {
+            try self.varDeclaration(allocator);
         } else {
-            try expressionStatement(self, allocator);
+            try self.statement(allocator);
         }
     }
 
@@ -265,6 +323,14 @@ const Parser = struct {
         try self.expression(allocator);
         try self.consume(.semicolon, "Expect ';' after expression.");
         try self.emitOps(allocator, &.{.pop});
+    }
+
+    fn statement(self: *Parser, allocator: Allocator) Error!void {
+        if (try self.match(.print)) {
+            try self.printStatement(allocator);
+        } else {
+            try self.expressionStatement(allocator);
+        }
     }
 
     fn synchronize(self: *Parser) Error!void {
@@ -296,17 +362,18 @@ pub fn compile(allocator: Allocator, gc: *GC, source: []const u8, chunk: *Chunk)
         .gc = gc,
     };
 
-    var result: Error!void = {};
-    result = parser.advance();
+    var first_error: ?Error = null;
+
+    try parser.advance();
 
     while (!try parser.match(.eof)) {
         parser.declaration(allocator) catch |err| {
             try parser.synchronize();
-            result = err;
+            if (first_error == null) first_error = err;
         };
     }
 
-    result = parser.endCompiler(allocator);
+    try parser.endCompiler(allocator);
 
-    return result;
+    if (first_error) |err| return err;
 }
