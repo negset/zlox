@@ -166,7 +166,7 @@ pub const VM = struct {
     }
 
     fn readConstant(self: *VM) Value {
-        return self.chunk.constants.items[readByte(self)];
+        return self.chunk.constants.items[self.readByte()];
     }
 
     fn readString(self: *VM) *const ObjString {

@@ -332,9 +332,9 @@ const Parser = struct {
     }
 
     fn resolveLocal(self: *Parser, compiler: *Compiler, name: Token) Error!?u8 {
-        var i = compiler.local_count - 1;
-        while (i >= 0) : (i -= 1) {
-            const local = &compiler.locals[i];
+        for (0..compiler.local_count) |i| {
+            const slot = compiler.local_count - i - 1;
+            const local = &compiler.locals[slot];
             if (identifierEqual(name, local.name)) {
                 if (local.depth == null) {
                     return self.errorAtPrevious(
@@ -342,7 +342,7 @@ const Parser = struct {
                         "Can't read local variable in its own initializer.",
                     );
                 }
-                return i;
+                return @intCast(slot);
             }
         }
 

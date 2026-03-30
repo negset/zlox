@@ -30,6 +30,9 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         .define_global,
         .set_global,
         => constantInstruction(@tagName(instruction), chunk, offset),
+        .get_local,
+        .set_local,
+        => byteInstruction(@tagName(instruction), chunk, offset),
         else => simpleInstruction(@tagName(instruction), offset),
     };
 }
@@ -47,7 +50,7 @@ fn simpleInstruction(name: []const u8, offset: usize) usize {
     return offset + 1;
 }
 
-fn byteInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
+fn byteInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
     const slot = chunk.code.items[offset + 1].byte;
     std.debug.print("{s:<16} {d:>4}\n", .{ name, slot });
     return offset + 2;
