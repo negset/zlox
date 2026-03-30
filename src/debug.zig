@@ -46,3 +46,9 @@ fn simpleInstruction(name: []const u8, offset: usize) usize {
     std.debug.print("{s}\n", .{name});
     return offset + 1;
 }
+
+fn byteInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
+    const slot = chunk.code.items[offset + 1].byte;
+    std.debug.print("{s:<16} {d:>4}\n", .{ name, slot });
+    return offset + 2;
+}

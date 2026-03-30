@@ -4,7 +4,6 @@ const Obj = @import("object.zig").Obj;
 const ObjString = @import("object.zig").ObjString;
 const ObjStringContext = @import("object.zig").ObjStringContext;
 const Value = @import("value.zig").Value;
-
 const Table = std.HashMapUnmanaged(*const ObjString, Value, ObjStringContext, 75);
 
 pub const GC = struct {

@@ -56,9 +56,18 @@ pub const Token = struct {
 
 pub const Scanner = struct {
     source: []const u8,
-    start: usize = 0,
-    current: usize = 0,
-    line: u32 = 1,
+    start: usize,
+    current: usize,
+    line: u32,
+
+    pub fn init(source: []const u8) Scanner {
+        return .{
+            .source = source,
+            .start = 0,
+            .current = 0,
+            .line = 1,
+        };
+    }
 
     fn isAlpha(c: u8) bool {
         return (c >= 'a' and c <= 'z') or

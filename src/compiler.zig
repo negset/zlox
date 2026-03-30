@@ -10,7 +10,11 @@ const TokenType = @import("scanner.zig").TokenType;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 
-pub const Error = error{ InvalidSyntax, TooManyConstants } || Allocator.Error;
+pub const Error = error{
+    InvalidSyntax,
+    TooManyConstants,
+    TooManyLocals,
+} || Allocator.Error;
 
 const Precedence = enum {
     none,
@@ -64,11 +68,25 @@ const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
 });
 
 const Parser = struct {
-    scanner: *Scanner,
-    compiling_chunk: *Chunk,
+    scanner: Scanner,
+    compiler: *Compiler,
+    gc: *GC,
     current: Token = undefined,
     previous: Token = undefined,
-    gc: *GC,
+    compiling_chunk: *Chunk,
+
+    pub fn init(source: []const u8, compiler: *Compiler, gc: *GC, chunk: *Chunk) Parser {
+        return .{
+            .scanner = .init(source),
+            .compiler = compiler,
+            .gc = gc,
+            .compiling_chunk = chunk,
+        };
+    }
+
+    fn currentChunk(self: *Parser) *Chunk {
+        return self.compiling_chunk;
+    }
 
     fn errorAt(token: Token, err: Error, message: []const u8) Error {
         std.debug.print("[line {d}] {s} (comptime)", .{ token.line, @errorName(err) });
@@ -122,7 +140,7 @@ const Parser = struct {
     }
 
     fn emitByte(self: *Parser, allocator: Allocator, byte: u8) Error!void {
-        try self.compiling_chunk.write(allocator, byte, self.previous.line);
+        try self.currentChunk().write(allocator, byte, self.previous.line);
     }
 
     fn emitBytes(self: *Parser, allocator: Allocator, byte1: u8, byte2: u8) Error!void {
@@ -141,11 +159,14 @@ const Parser = struct {
     }
 
     fn makeConstant(self: *Parser, allocator: Allocator, value: Value) Error!u8 {
-        const index = try self.compiling_chunk.addConstant(allocator, value);
+        const index = try self.currentChunk().addConstant(allocator, value);
         // Make sure the chunk does not contain too many constants,
         // since OpCode.constant uses a single byte for its index operand.
         const byte = std.math.cast(u8, index) orelse {
-            return self.errorAtPrevious(error.TooManyConstants, "Too many constants in one chunk.");
+            return self.errorAtPrevious(
+                error.TooManyConstants,
+                "Too many constants in one chunk.",
+            );
         };
         return byte;
     }
@@ -161,7 +182,20 @@ const Parser = struct {
     pub fn endCompiler(self: *Parser, allocator: Allocator) Error!void {
         try self.emitReturn(allocator);
         if (comptime debug.print_code) {
-            debug.disassembleChunk(self.compiling_chunk, "code");
+            debug.disassembleChunk(self.currentChunk(), "code");
+        }
+    }
+
+    pub fn beginScope(self: *Parser) void {
+        self.compiler.scope_depth += 1;
+    }
+
+    pub fn endScope(self: *Parser, allocator: Allocator) Error!void {
+        const c = self.compiler;
+        c.scope_depth -= 1;
+
+        while (c.local_count > 0 and c.locals[c.local_count - 1].depth.? > c.scope_depth) : (c.local_count -= 1) {
+            try self.emitOps(allocator, &.{.pop});
         }
     }
 
@@ -211,26 +245,38 @@ const Parser = struct {
         try self.emitConstant(allocator, .{ .obj = &obj_string.obj });
     }
 
-    fn namedVariable(self: *Parser, allocator: Allocator, can_assign: bool) Error!void {
-        const arg = try self.identifierConstant(allocator, self.previous);
+    fn namedVariable(self: *Parser, allocator: Allocator, name: Token, can_assign: bool) Error!void {
+        var get_op: OpCode = undefined;
+        var set_op: OpCode = undefined;
+        var arg: u8 = undefined;
+        if (try self.resolveLocal(self.compiler, name)) |local| {
+            get_op = .get_local;
+            set_op = .set_local;
+            arg = local;
+        } else {
+            get_op = .get_global;
+            set_op = .set_global;
+            arg = try self.identifierConstant(allocator, name);
+        }
+
         if (can_assign and try self.match(.equal)) {
             try self.expression(allocator);
             try self.emitBytes(
                 allocator,
-                @intFromEnum(OpCode.set_global),
+                @intFromEnum(set_op),
                 arg,
             );
         } else {
             try self.emitBytes(
                 allocator,
-                @intFromEnum(OpCode.get_global),
+                @intFromEnum(get_op),
                 arg,
             );
         }
     }
 
     fn variable(self: *Parser, allocator: Allocator, can_assign: bool) Error!void {
-        try self.namedVariable(allocator, can_assign);
+        try self.namedVariable(allocator, self.previous, can_assign);
     }
 
     fn unary(self: *Parser, allocator: Allocator, _: bool) Error!void {
@@ -255,7 +301,10 @@ const Parser = struct {
         if (rules.get(self.previous.token_type).prefix) |prefix_rule| {
             try prefix_rule(self, allocator, can_assign);
         } else {
-            return self.errorAtPrevious(error.InvalidSyntax, "Expect expression.");
+            return self.errorAtPrevious(
+                error.InvalidSyntax,
+                "Expect expression.",
+            );
         }
 
         while (precedence.le(rules.get(self.current.token_type).precedence)) {
@@ -265,7 +314,10 @@ const Parser = struct {
         }
 
         if (can_assign and try self.match(.equal)) {
-            return self.errorAtPrevious(error.InvalidSyntax, "Invalid assignment target.");
+            return self.errorAtPrevious(
+                error.InvalidSyntax,
+                "Invalid assignment target.",
+            );
         }
     }
 
@@ -274,12 +326,87 @@ const Parser = struct {
         return self.makeConstant(allocator, .{ .obj = &obj_string.obj });
     }
 
+    fn identifierEqual(a: Token, b: Token) bool {
+        if (a.lexeme.len != b.lexeme.len) return false;
+        return std.mem.eql(u8, a.lexeme, b.lexeme);
+    }
+
+    fn resolveLocal(self: *Parser, compiler: *Compiler, name: Token) Error!?u8 {
+        var i = compiler.local_count - 1;
+        while (i >= 0) : (i -= 1) {
+            const local = &compiler.locals[i];
+            if (identifierEqual(name, local.name)) {
+                if (local.depth == null) {
+                    return self.errorAtPrevious(
+                        error.InvalidSyntax,
+                        "Can't read local variable in its own initializer.",
+                    );
+                }
+                return i;
+            }
+        }
+
+        return null;
+    }
+
+    fn addLocal(self: *Parser, name: Token) Error!void {
+        if (self.compiler.local_count == u8_count) {
+            return self.errorAtPrevious(
+                error.TooManyLocals,
+                "Too many local variables in function.",
+            );
+        }
+
+        defer self.compiler.local_count += 1;
+        const local = &self.compiler.locals[self.compiler.local_count];
+        local.name = name;
+        local.depth = null;
+    }
+
+    fn declareVariable(self: *Parser) Error!void {
+        // Skip global variable.
+        if (self.compiler.scope_depth == 0) return;
+
+        const name = self.previous;
+        for (0..self.compiler.local_count) |i| {
+            const local = &self.compiler.locals[self.compiler.local_count - i - 1];
+            if (local.depth) |depth| {
+                if (depth < self.compiler.scope_depth) break;
+            }
+
+            if (identifierEqual(name, local.name)) {
+                return self.errorAtPrevious(
+                    error.InvalidSyntax,
+                    "Already a variable with this name in this scope.",
+                );
+            }
+        }
+
+        try self.addLocal(name);
+    }
+
     fn parseVariable(self: *Parser, allocator: Allocator, message: []const u8) Error!u8 {
         try self.consume(.identifier, message);
+
+        try self.declareVariable();
+        // If in a local scope, return dummy index.
+        if (self.compiler.scope_depth > 0) return 0;
+
         return self.identifierConstant(allocator, self.previous);
     }
 
+    fn markInitialized(self: *Parser) void {
+        const c = self.compiler;
+        c.locals[c.local_count - 1].depth = c.scope_depth;
+    }
+
     fn defineVariable(self: *Parser, allocator: Allocator, global: u8) Error!void {
+        // If in a local scope, use stack value as a local variable.
+        if (self.compiler.scope_depth > 0) {
+            self.markInitialized();
+            return;
+        }
+
         try self.emitBytes(
             allocator,
             @intFromEnum(OpCode.define_global),
@@ -289,6 +416,14 @@ const Parser = struct {
 
     fn expression(self: *Parser, allocator: Allocator) Error!void {
         try self.parsePrecedence(allocator, .assignment);
+    }
+
+    fn block(self: *Parser, allocator: Allocator) Error!void {
+        while (!self.check(.right_brace) and !self.check(.eof)) {
+            try self.declaration(allocator);
+        }
+
+        try self.consume(.right_brace, "Expect '}' after block.");
     }
 
     fn varDeclaration(self: *Parser, allocator: Allocator) Error!void {
@@ -328,6 +463,10 @@ const Parser = struct {
     fn statement(self: *Parser, allocator: Allocator) Error!void {
         if (try self.match(.print)) {
             try self.printStatement(allocator);
+        } else if (try self.match(.left_brace)) {
+            self.beginScope();
+            try self.block(allocator);
+            try self.endScope(allocator);
         } else {
             try self.expressionStatement(allocator);
         }
@@ -355,12 +494,8 @@ const Parser = struct {
 };
 
 pub fn compile(allocator: Allocator, gc: *GC, source: []const u8, chunk: *Chunk) Error!void {
-    var scanner = Scanner{ .source = source };
-    var parser = Parser{
-        .scanner = &scanner,
-        .compiling_chunk = chunk,
-        .gc = gc,
-    };
+    var compiler = Compiler.init;
+    var parser = Parser.init(source, &compiler, gc, chunk);
 
     var first_error: ?Error = null;
 
@@ -377,3 +512,22 @@ pub fn compile(allocator: Allocator, gc: *GC, source: []const u8, chunk: *Chunk)
 
     if (first_error) |err| return err;
 }
+
+const Local = struct {
+    name: Token,
+    depth: ?u32,
+};
+
+const u8_count = std.math.maxInt(u8) + 1;
+
+const Compiler = struct {
+    locals: [u8_count]Local,
+    local_count: u8,
+    scope_depth: u32,
+
+    pub const init = Compiler{
+        .locals = undefined,
+        .local_count = 0,
+        .scope_depth = 0,
+    };
+};
