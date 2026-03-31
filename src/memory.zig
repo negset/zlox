@@ -23,12 +23,12 @@ pub const GC = struct {
         self.strings.deinit(allocator);
     }
 
-    pub fn createObject(self: *GC, allocator: Allocator, T: type) Allocator.Error!*T {
+    pub fn createObject(self: *GC, allocator: Allocator, comptime T: type) Allocator.Error!*T {
+        if (comptime !@hasField(T, "obj")) {
+            @compileError("Unknown object type: " ++ @typeName(T));
+        }
+
         const ptr = try allocator.create(T);
-        ptr.obj.obj_type = switch (T) {
-            ObjString => .string,
-            else => @panic("Unknown object type."),
-        };
         ptr.obj.next = self.objects;
         self.objects = &ptr.obj;
         return ptr;
@@ -36,11 +36,7 @@ pub const GC = struct {
 
     fn freeObject(allocator: Allocator, obj: *Obj) void {
         switch (obj.obj_type) {
-            .string => {
-                const obj_string = obj.as(ObjString);
-                allocator.free(obj_string.string);
-                allocator.destroy(obj_string);
-            },
+            .string => obj.as(ObjString).destroy(allocator),
         }
     }
 

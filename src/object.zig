@@ -12,6 +12,12 @@ pub const Obj = struct {
     next: ?*Obj,
 
     pub fn as(self: *const Obj, comptime T: type) *const T {
+        const type_ok = switch (comptime T) {
+            ObjString => self.obj_type == .string,
+            else => false,
+        };
+        if (!type_ok) @compileError("Invalid type cast: " ++ @typeName(T));
+
         return @alignCast(@fieldParentPtr("obj", self));
     }
 
@@ -28,7 +34,8 @@ pub const ObjString = struct {
     hash: u64,
 
     fn create(allocator: Allocator, gc: *GC, string: []const u8, hash: u64) Allocator.Error!*const @This() {
-        const obj_string = try gc.createObject(allocator, ObjString);
+        const obj_string = try gc.createObject(allocator, @This());
+        obj_string.obj.obj_type = .string;
         obj_string.string = string;
         obj_string.hash = hash;
         try gc.strings.put(allocator, obj_string, Value{ .nil = {} });
@@ -53,6 +60,11 @@ pub const ObjString = struct {
         }
 
         return create(allocator, gc, string, hash);
+    }
+
+    pub fn destroy(self: *const ObjString, allocator: Allocator) void {
+        allocator.free(self.string);
+        allocator.destroy(self);
     }
 };
 
