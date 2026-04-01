@@ -50,11 +50,10 @@ pub const GC = struct {
     }
 
     pub fn findString(self: *GC, string: []const u8, hash: u64) ?*const ObjString {
-        var obj_string = ObjString{
+        return self.strings.getKey(&.{
             .obj = undefined,
             .string = string,
             .hash = hash,
-        };
-        return self.strings.getKey(&obj_string);
+        });
     }
 };

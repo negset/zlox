@@ -35,7 +35,7 @@ pub const VM = struct {
     }
 
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
-        const line = self.chunk.code.items[self.ip - 1].line;
+        const line = self.chunk.lines.items[self.ip - 1];
         std.debug.print("[line {d}] {s} (runtime): ", .{ line, @errorName(err) });
         std.debug.print(fmt ++ "\n", args);
 
@@ -152,6 +152,14 @@ pub const VM = struct {
                     self.pop().print();
                     std.debug.print("\n", .{});
                 },
+                .jump => {
+                    const offset = self.readShort();
+                    self.ip += offset;
+                },
+                .jump_if_false => {
+                    const offset = self.readShort();
+                    if (self.peek(0).isFalsey()) self.ip += offset;
+                },
                 .@"return" => {
                     // Exit interpreter.
                     return;
@@ -162,7 +170,13 @@ pub const VM = struct {
 
     fn readByte(self: *VM) u8 {
         defer self.ip += 1;
-        return self.chunk.code.items[self.ip].byte;
+        return self.chunk.code.items[self.ip];
+    }
+
+    fn readShort(self: *VM) u16 {
+        defer self.ip += 2;
+        const buf = self.chunk.code.items[self.ip .. self.ip + 2];
+        return std.mem.readInt(u16, buf[0..2], .big);
     }
 
     fn readConstant(self: *VM) Value {

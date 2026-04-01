@@ -12,9 +12,8 @@ pub const Obj = struct {
     next: ?*Obj,
 
     pub fn as(self: *const Obj, comptime T: type) *const T {
-        const type_ok = switch (comptime T) {
-            ObjString => self.obj_type == .string,
-            else => false,
+        const type_ok = switch (comptime self.obj_type) {
+            .string => T == ObjString,
         };
         if (!type_ok) @compileError("Invalid type cast: " ++ @typeName(T));
 

@@ -12,8 +12,7 @@ const debug = @import("debug.zig");
 
 pub const Error = error{
     InvalidSyntax,
-    TooManyConstants,
-    TooManyLocals,
+    TooManyElements,
 } || Allocator.Error;
 
 const Precedence = enum {
@@ -154,6 +153,13 @@ const Parser = struct {
         }
     }
 
+    fn emitJump(self: *Parser, allocator: Allocator, instruction: OpCode) Error!usize {
+        try self.emitByte(allocator, @intFromEnum(instruction));
+        try self.emitByte(allocator, 0xff);
+        try self.emitByte(allocator, 0xff);
+        return self.currentChunk().code.items.len - 2;
+    }
+
     fn emitReturn(self: *Parser, allocator: Allocator) Error!void {
         try self.emitOps(allocator, &.{.@"return"});
     }
@@ -164,7 +170,7 @@ const Parser = struct {
         // since OpCode.constant uses a single byte for its index operand.
         const byte = std.math.cast(u8, index) orelse {
             return self.errorAtPrevious(
-                error.TooManyConstants,
+                error.TooManyElements,
                 "Too many constants in one chunk.",
             );
         };
@@ -177,6 +183,21 @@ const Parser = struct {
             @intFromEnum(OpCode.constant),
             try self.makeConstant(allocator, value),
         );
+    }
+
+    fn patchJump(self: *Parser, offset: usize) Error!void {
+        // -2 to adjust for the bytecode for the jump offset itself.
+        const jump = self.currentChunk().code.items.len - offset - 2;
+
+        if (jump > std.math.maxInt(u16)) {
+            return self.errorAtPrevious(
+                error.TooManyElements,
+                "Too much code to jump over.",
+            );
+        }
+
+        const target = self.currentChunk().code.items[offset .. offset + 2];
+        std.mem.writeInt(u16, target[0..2], @intCast(jump), .big);
     }
 
     pub fn endCompiler(self: *Parser, allocator: Allocator) Error!void {
@@ -352,7 +373,7 @@ const Parser = struct {
     fn addLocal(self: *Parser, name: Token) Error!void {
         if (self.compiler.local_count == u8_count) {
             return self.errorAtPrevious(
-                error.TooManyLocals,
+                error.TooManyElements,
                 "Too many local variables in function.",
             );
         }
@@ -460,9 +481,29 @@ const Parser = struct {
         try self.emitOps(allocator, &.{.pop});
     }
 
+    fn ifStatement(self: *Parser, allocator: Allocator) Error!void {
+        try self.consume(.left_paren, "Expect '(' after 'if'.");
+        try self.expression(allocator);
+        try self.consume(.right_paren, "Expect ')' after condition.");
+
+        const then_jump = try self.emitJump(allocator, .jump_if_false);
+        try self.emitOps(allocator, &.{.pop});
+        try self.statement(allocator);
+
+        const else_jump = try self.emitJump(allocator, .jump);
+
+        try self.patchJump(then_jump);
+        try self.emitOps(allocator, &.{.pop});
+
+        if (try self.match(.@"else")) try self.statement(allocator);
+        try self.patchJump(else_jump);
+    }
+
     fn statement(self: *Parser, allocator: Allocator) Error!void {
         if (try self.match(.print)) {
             try self.printStatement(allocator);
+        } else if (try self.match(.@"if")) {
+            try self.ifStatement(allocator);
         } else if (try self.match(.left_brace)) {
             self.beginScope();
             try self.block(allocator);
