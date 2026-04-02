@@ -4,7 +4,6 @@ const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
-const debug = @import("debug.zig");
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -42,6 +41,7 @@ fn repl(allocator: Allocator, vm: *VM) void {
             break;
         };
 
+        // Ignore error.
         vm.interpret(allocator, line) catch {};
     }
 }

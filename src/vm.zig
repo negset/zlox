@@ -8,6 +8,7 @@ const Obj = @import("object.zig").Obj;
 const ObjString = @import("object.zig").ObjString;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
+const config = @import("config");
 
 const stack_max: usize = 256;
 
@@ -69,7 +70,7 @@ pub const VM = struct {
         self.ip = 0;
 
         while (true) {
-            if (comptime debug.trace_execution) {
+            if (comptime config.trace_execution) {
                 std.debug.print("          ", .{});
                 for (self.stack.items) |slot| {
                     std.debug.print("[ ", .{});
@@ -153,12 +154,16 @@ pub const VM = struct {
                     std.debug.print("\n", .{});
                 },
                 .jump => {
-                    const offset = self.readShort();
-                    self.ip += offset;
+                    const distance = self.readShort();
+                    self.ip += distance;
                 },
                 .jump_if_false => {
-                    const offset = self.readShort();
-                    if (self.peek(0).isFalsey()) self.ip += offset;
+                    const distance = self.readShort();
+                    if (self.peek(0).isFalsey()) self.ip += distance;
+                },
+                .loop => {
+                    const distance = self.readShort();
+                    self.ip -= distance;
                 },
                 .@"return" => {
                     // Exit interpreter.

@@ -9,6 +9,7 @@ const Token = @import("scanner.zig").Token;
 const TokenType = @import("scanner.zig").TokenType;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
+const config = @import("config");
 
 pub const Error = error{
     InvalidSyntax,
@@ -61,9 +62,11 @@ const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
     .identifier = .{ .prefix = Parser.variable },
     .string = .{ .prefix = Parser.string },
     .number = .{ .prefix = Parser.number },
+    .@"and" = .{ .infix = Parser.@"and", .precedence = .@"and" },
     .false = .{ .prefix = Parser.literal },
     .true = .{ .prefix = Parser.literal },
     .nil = .{ .prefix = Parser.literal },
+    .@"or" = .{ .infix = Parser.@"or", .precedence = .@"or" },
 });
 
 const Parser = struct {
@@ -153,10 +156,31 @@ const Parser = struct {
         }
     }
 
+    fn emitLoop(self: *Parser, allocator: Allocator, loop_start: usize) Error!void {
+        try self.emitOps(allocator, &.{.loop});
+
+        // +2 to take into account the loop distance itself.
+        const distance = self.currentChunk().code.items.len - loop_start + 2;
+        if (distance > std.math.maxInt(u16)) {
+            return self.errorAtPrevious(
+                error.TooManyElements,
+                "Loop body too large.",
+            );
+        }
+
+        try self.emitBytes(
+            allocator,
+            @truncate(distance >> 8),
+            @truncate(distance),
+        );
+    }
+
     fn emitJump(self: *Parser, allocator: Allocator, instruction: OpCode) Error!usize {
         try self.emitByte(allocator, @intFromEnum(instruction));
+        // Emit temporary jump distance.
         try self.emitByte(allocator, 0xff);
         try self.emitByte(allocator, 0xff);
+        // Return offset of jump distance.
         return self.currentChunk().code.items.len - 2;
     }
 
@@ -185,24 +209,25 @@ const Parser = struct {
         );
     }
 
-    fn patchJump(self: *Parser, offset: usize) Error!void {
-        // -2 to adjust for the bytecode for the jump offset itself.
-        const jump = self.currentChunk().code.items.len - offset - 2;
+    fn patchJump(self: *Parser, target: usize) Error!void {
+        // -2 to take into account the jump distance itself.
+        const distance = self.currentChunk().code.items.len - target - 2;
 
-        if (jump > std.math.maxInt(u16)) {
+        if (distance > std.math.maxInt(u16)) {
             return self.errorAtPrevious(
                 error.TooManyElements,
                 "Too much code to jump over.",
             );
         }
 
-        const target = self.currentChunk().code.items[offset .. offset + 2];
-        std.mem.writeInt(u16, target[0..2], @intCast(jump), .big);
+        // Patch jump distance into previously emitted one.
+        const buf = self.currentChunk().code.items[target..];
+        std.mem.writeInt(u16, buf[0..2], @intCast(distance), .big);
     }
 
     pub fn endCompiler(self: *Parser, allocator: Allocator) Error!void {
         try self.emitReturn(allocator);
-        if (comptime debug.print_code) {
+        if (comptime config.print_code) {
             debug.disassembleChunk(self.currentChunk(), "code");
         }
     }
@@ -257,6 +282,18 @@ const Parser = struct {
         const value = std.fmt.parseFloat(f64, self.previous.lexeme) catch
             @panic("Invalid number.");
         try self.emitConstant(allocator, .{ .number = value });
+    }
+
+    fn @"or"(self: *Parser, allocator: Allocator, _: bool) Error!void {
+        const else_jump = try self.emitJump(allocator, .jump_if_false);
+        const end_jump = try self.emitJump(allocator, .jump);
+
+        try self.patchJump(else_jump);
+        // Discard the left operand when it is falsey.
+        try self.emitOps(allocator, &.{.pop});
+
+        try self.parsePrecedence(allocator, .@"or");
+        try self.patchJump(end_jump);
     }
 
     fn string(self: *Parser, allocator: Allocator, _: bool) Error!void {
@@ -435,6 +472,16 @@ const Parser = struct {
         );
     }
 
+    fn @"and"(self: *Parser, allocator: Allocator, _: bool) Error!void {
+        const end_jump = try self.emitJump(allocator, .jump_if_false);
+
+        // Discard the left operand when it is truthy.
+        try self.emitOps(allocator, &.{.pop});
+        try self.parsePrecedence(allocator, .@"and");
+
+        try self.patchJump(end_jump);
+    }
+
     fn expression(self: *Parser, allocator: Allocator) Error!void {
         try self.parsePrecedence(allocator, .assignment);
     }
@@ -475,10 +522,78 @@ const Parser = struct {
         try self.emitOps(allocator, &.{.print});
     }
 
+    fn whileStatement(self: *Parser, allocator: Allocator) Error!void {
+        const loop_start = self.currentChunk().code.items.len;
+        try self.consume(.left_paren, "Expect '(' after 'while'.");
+        try self.expression(allocator);
+        try self.consume(.right_paren, "Expect ')' after condition.");
+
+        const exit_jump = try self.emitJump(allocator, .jump_if_false);
+        // Discard the condition when it is truthy.
+        try self.emitOps(allocator, &.{.pop});
+        try self.statement(allocator);
+        try self.emitLoop(allocator, loop_start);
+
+        try self.patchJump(exit_jump);
+        // Discard the condition when it is falsey.
+        try self.emitOps(allocator, &.{.pop});
+    }
+
     fn expressionStatement(self: *Parser, allocator: Allocator) Error!void {
         try self.expression(allocator);
         try self.consume(.semicolon, "Expect ';' after expression.");
         try self.emitOps(allocator, &.{.pop});
+    }
+
+    fn forStatement(self: *Parser, allocator: Allocator) Error!void {
+        self.beginScope();
+        try self.consume(.left_paren, "Expect '(' after 'for'.");
+        // Initializer clause is optional.
+        if (try self.match(.semicolon)) {
+            // No initializer.
+        } else if (try self.match(.@"var")) {
+            try self.varDeclaration(allocator);
+        } else {
+            try self.expressionStatement(allocator);
+        }
+
+        var loop_start = self.currentChunk().code.items.len;
+        var exit_jump: ?usize = null;
+        // Condition clause is optional.
+        if (!try self.match(.semicolon)) {
+            try self.expression(allocator);
+            try self.consume(.semicolon, "Expecet ';' after loop condition.");
+
+            // Jump out of the loop if the condition is false.
+            exit_jump = try self.emitJump(allocator, .jump_if_false);
+            // Discard the condition when it is truthy.
+            try self.emitOps(allocator, &.{.pop});
+        }
+
+        // Increment clause is optional.
+        if (!try self.match(.right_paren)) {
+            const body_jump = try self.emitJump(allocator, .jump);
+            const increment_start = self.currentChunk().code.items.len;
+            try self.expression(allocator);
+            // Discard the increment result.
+            try self.emitOps(allocator, &.{.pop});
+            try self.consume(.right_paren, "Expect ')' after for clauses.");
+
+            try self.emitLoop(allocator, loop_start);
+            loop_start = increment_start;
+            try self.patchJump(body_jump);
+        }
+
+        try self.statement(allocator);
+        try self.emitLoop(allocator, loop_start);
+
+        if (exit_jump) |_| {
+            try self.patchJump(exit_jump.?);
+            // Discard the condition when it is falsey.
+            try self.emitOps(allocator, &.{.pop});
+        }
+
+        try self.endScope(allocator);
     }
 
     fn ifStatement(self: *Parser, allocator: Allocator) Error!void {
@@ -487,12 +602,14 @@ const Parser = struct {
         try self.consume(.right_paren, "Expect ')' after condition.");
 
         const then_jump = try self.emitJump(allocator, .jump_if_false);
+        // Discard the condition when it is truthy.
         try self.emitOps(allocator, &.{.pop});
         try self.statement(allocator);
 
         const else_jump = try self.emitJump(allocator, .jump);
 
         try self.patchJump(then_jump);
+        // Discard the condition when it is falsey.
         try self.emitOps(allocator, &.{.pop});
 
         if (try self.match(.@"else")) try self.statement(allocator);
@@ -502,8 +619,12 @@ const Parser = struct {
     fn statement(self: *Parser, allocator: Allocator) Error!void {
         if (try self.match(.print)) {
             try self.printStatement(allocator);
+        } else if (try self.match(.@"for")) {
+            try self.forStatement(allocator);
         } else if (try self.match(.@"if")) {
             try self.ifStatement(allocator);
+        } else if (try self.match(.@"while")) {
+            try self.whileStatement(allocator);
         } else if (try self.match(.left_brace)) {
             self.beginScope();
             try self.block(allocator);

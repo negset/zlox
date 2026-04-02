@@ -3,9 +3,6 @@ const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
 
-pub const trace_execution = true;
-pub const print_code = true;
-
 pub fn disassembleChunk(chunk: *const Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
 
@@ -36,6 +33,8 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         .jump,
         .jump_if_false,
         => jumpInstruction(@tagName(instruction), true, chunk, offset),
+        .loop,
+        => jumpInstruction(@tagName(instruction), false, chunk, offset),
         else => simpleInstruction(@tagName(instruction), offset),
     };
 }
@@ -59,10 +58,10 @@ fn byteInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
     return offset + 2;
 }
 
-fn jumpInstruction(name: []const u8, is_forward: bool, chunk: *const Chunk, offset: usize) usize {
-    const buf = chunk.code.items[offset + 1 .. offset + 3];
-    const jump = std.mem.readInt(u16, buf[0..2], .big);
-    const target = if (is_forward) offset + 3 + jump else offset + 3 - jump;
-    std.debug.print("{s:<16} {d:>4} -> {d}\n", .{ name, offset, target });
+fn jumpInstruction(name: []const u8, comptime is_forward: bool, chunk: *const Chunk, offset: usize) usize {
+    const buf = chunk.code.items[offset + 1 ..];
+    const distance = std.mem.readInt(u16, buf[0..2], .big);
+    const dest = if (is_forward) offset + 3 + distance else offset + 3 - distance;
+    std.debug.print("{s:<16} {d:>4} -> {d}\n", .{ name, offset, dest });
     return offset + 3;
 }
