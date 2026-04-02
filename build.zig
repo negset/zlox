@@ -13,6 +13,15 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const trace_execution = b.option(bool, "trace_execution", "Enable execution trace.") orelse false;
+    const print_code = b.option(bool, "print_code", "Enable code print.") orelse false;
+    const debug = b.option(bool, "debug", "Enable all debug print.") orelse false;
+
+    const options = b.addOptions();
+    options.addOption(bool, "trace_execution", trace_execution or debug);
+    options.addOption(bool, "print_code", print_code or debug);
+    exe.root_module.addOptions("config", options);
+
     b.installArtifact(exe);
 
     const run_step = b.step("run", "Run the app");
