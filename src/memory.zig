@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Obj = @import("object.zig").Obj;
+const ObjFunction = @import("object.zig").ObjFunction;
 const ObjString = @import("object.zig").ObjString;
 const ObjStringContext = @import("object.zig").ObjStringContext;
 const Value = @import("value.zig").Value;
@@ -28,14 +29,16 @@ pub const GC = struct {
             @compileError("Unknown object type: " ++ @typeName(T));
         }
 
-        const ptr = try allocator.create(T);
-        ptr.obj.next = self.objects;
-        self.objects = &ptr.obj;
-        return ptr;
+        const new = try allocator.create(T);
+        new.obj.obj_type = T.obj_type;
+        new.obj.next = self.objects;
+        self.objects = &new.obj;
+        return new;
     }
 
     fn freeObject(allocator: Allocator, obj: *Obj) void {
         switch (obj.obj_type) {
+            .function => obj.as(ObjFunction).destory(allocator),
             .string => obj.as(ObjString).destroy(allocator),
         }
     }
