@@ -32,11 +32,12 @@ pub const ObjFunction = struct {
     obj: Obj,
     arity: u32,
     chunk: Chunk,
+    // Null if it is top-level code.
     name: ?*const ObjString,
 
     pub const obj_type = ObjType.function;
 
-    pub fn create(allocator: Allocator, gc: *GC) Allocator.Error!*const @This() {
+    pub fn create(allocator: Allocator, gc: *GC) Allocator.Error!*@This() {
         const new = try gc.createObject(allocator, @This());
         new.arity = 0;
         new.name = null;
@@ -52,7 +53,11 @@ pub const ObjFunction = struct {
     }
 
     pub fn print(self: @This()) void {
-        std.debug.print("<fn {s}>", .{self.name.?.string});
+        if (self.name) |name| {
+            std.debug.print("<fn {s}>", .{name.string});
+        } else {
+            std.debug.print("<script>", .{});
+        }
     }
 };
 

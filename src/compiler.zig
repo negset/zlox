@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const GC = @import("memory.zig").GC;
+const ObjFunction = @import("object.zig").ObjFunction;
 const ObjString = @import("object.zig").ObjString;
 const Scanner = @import("scanner.zig").Scanner;
 const Token = @import("scanner.zig").Token;
@@ -75,19 +76,17 @@ const Parser = struct {
     gc: *GC,
     current: Token = undefined,
     previous: Token = undefined,
-    compiling_chunk: *Chunk,
 
-    pub fn init(source: []const u8, compiler: *Compiler, gc: *GC, chunk: *Chunk) Parser {
+    pub fn init(source: []const u8, compiler: *Compiler, gc: *GC) Parser {
         return .{
             .scanner = .init(source),
             .compiler = compiler,
             .gc = gc,
-            .compiling_chunk = chunk,
         };
     }
 
     fn currentChunk(self: *Parser) *Chunk {
-        return self.compiling_chunk;
+        return &self.compiler.function.?.chunk;
     }
 
     fn errorAt(token: Token, err: Error, message: []const u8) Error {
@@ -225,11 +224,16 @@ const Parser = struct {
         std.mem.writeInt(u16, buf[0..2], @intCast(distance), .big);
     }
 
-    pub fn endCompiler(self: *Parser, allocator: Allocator) Error!void {
+    pub fn endCompiler(self: *Parser, allocator: Allocator) Error!*const ObjFunction {
         try self.emitReturn(allocator);
+        const function = self.compiler.function.?;
+
         if (comptime config.print_code) {
-            debug.disassembleChunk(self.currentChunk(), "code");
+            const name = if (function.name) |n| n.string else "<script>";
+            debug.disassembleChunk(self.currentChunk(), name);
         }
+
+        return function;
     }
 
     pub fn beginScope(self: *Parser) void {
@@ -408,7 +412,7 @@ const Parser = struct {
     }
 
     fn addLocal(self: *Parser, name: Token) Error!void {
-        if (self.compiler.local_count == u8_count) {
+        if (self.compiler.local_count == Compiler.u8_count) {
             return self.errorAtPrevious(
                 error.TooManyElements,
                 "Too many local variables in function.",
@@ -655,9 +659,51 @@ const Parser = struct {
     }
 };
 
-pub fn compile(allocator: Allocator, gc: *GC, source: []const u8, chunk: *Chunk) Error!void {
-    var compiler = Compiler.init;
-    var parser = Parser.init(source, &compiler, gc, chunk);
+const Local = struct {
+    name: Token,
+    // Null if it is uninitialized.
+    depth: ?u32,
+};
+
+const FunctionType = enum {
+    function,
+    script,
+};
+
+pub const Compiler = struct {
+    function: ?*ObjFunction,
+    function_type: FunctionType,
+
+    locals: [u8_count]Local,
+    local_count: u8,
+    scope_depth: u32,
+
+    pub const u8_count = std.math.maxInt(u8) + 1;
+
+    pub fn init(allocator: Allocator, gc: *GC, function_type: FunctionType) Allocator.Error!@This() {
+        var new = Compiler{
+            // Set null beforehand to prevent GC from running on uninitialized "function"
+            // when calling ObjFunction.create.
+            .function = null,
+            .function_type = function_type,
+            .locals = undefined,
+            .local_count = 0,
+            .scope_depth = 0,
+        };
+        new.function = try ObjFunction.create(allocator, gc);
+
+        const local = &new.locals[new.local_count];
+        new.local_count += 1;
+        local.depth = 0;
+        local.name.lexeme = "";
+
+        return new;
+    }
+};
+
+pub fn compile(allocator: Allocator, gc: *GC, source: []const u8) Error!*const ObjFunction {
+    var compiler = try Compiler.init(allocator, gc, .script);
+    var parser = Parser.init(source, &compiler, gc);
 
     var first_error: ?Error = null;
 
@@ -670,26 +716,7 @@ pub fn compile(allocator: Allocator, gc: *GC, source: []const u8, chunk: *Chunk)
         };
     }
 
-    try parser.endCompiler(allocator);
+    const function = try parser.endCompiler(allocator);
 
-    if (first_error) |err| return err;
+    return if (first_error) |err| err else function;
 }
-
-const Local = struct {
-    name: Token,
-    depth: ?u32,
-};
-
-const u8_count = std.math.maxInt(u8) + 1;
-
-const Compiler = struct {
-    locals: [u8_count]Local,
-    local_count: u8,
-    scope_depth: u32,
-
-    pub const init = Compiler{
-        .locals = undefined,
-        .local_count = 0,
-        .scope_depth = 0,
-    };
-};
