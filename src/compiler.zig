@@ -48,7 +48,7 @@ const ParseRule = struct {
 };
 
 const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
-    .left_paren = .{ .prefix = Parser.grouping },
+    .left_paren = .{ .prefix = Parser.grouping, .infix = Parser.call, .precedence = .call },
     .minus = .{ .prefix = Parser.unary, .infix = Parser.binary, .precedence = .term },
     .plus = .{ .infix = Parser.binary, .precedence = .term },
     .slash = .{ .infix = Parser.binary, .precedence = .factor },
@@ -226,14 +226,17 @@ const Parser = struct {
 
     pub fn endCompiler(self: *Parser, allocator: Allocator) Error!*const ObjFunction {
         try self.emitReturn(allocator);
-        const function = self.compiler.function.?;
+        const obj_function = self.compiler.function.?;
 
         if (comptime config.print_code) {
-            const name = if (function.name) |n| n.string else "<script>";
+            const name = if (obj_function.name) |n| n.string else "<script>";
             debug.disassembleChunk(self.currentChunk(), name);
         }
 
-        return function;
+        if (self.compiler.enclosing) |enclosing| {
+            self.compiler = enclosing;
+        }
+        return obj_function;
     }
 
     pub fn beginScope(self: *Parser) void {
@@ -244,6 +247,7 @@ const Parser = struct {
         const c = self.compiler;
         c.scope_depth -= 1;
 
+        // Pop locals.
         while (c.local_count > 0 and c.locals[c.local_count - 1].depth.? > c.scope_depth) : (c.local_count -= 1) {
             try self.emitOps(allocator, &.{.pop});
         }
@@ -266,6 +270,15 @@ const Parser = struct {
             .less_equal => &.{ .greater, .not },
             else => unreachable,
         });
+    }
+
+    fn call(self: *Parser, allocator: Allocator, _: bool) Error!void {
+        const arg_count = try self.argumentList(allocator);
+        try self.emitBytes(
+            allocator,
+            @intFromEnum(OpCode.call),
+            arg_count,
+        );
     }
 
     fn literal(self: *Parser, allocator: Allocator, _: bool) Error!void {
@@ -388,16 +401,11 @@ const Parser = struct {
         return self.makeConstant(allocator, .{ .obj = &obj_string.obj });
     }
 
-    fn identifierEqual(a: Token, b: Token) bool {
-        if (a.lexeme.len != b.lexeme.len) return false;
-        return std.mem.eql(u8, a.lexeme, b.lexeme);
-    }
-
     fn resolveLocal(self: *Parser, compiler: *Compiler, name: Token) Error!?u8 {
         for (0..compiler.local_count) |i| {
             const slot = compiler.local_count - i - 1;
             const local = &compiler.locals[slot];
-            if (identifierEqual(name, local.name)) {
+            if (name.identifierEquals(local.name)) {
                 if (local.depth == null) {
                     return self.errorAtPrevious(
                         error.InvalidSyntax,
@@ -436,7 +444,7 @@ const Parser = struct {
                 if (depth < self.compiler.scope_depth) break;
             }
 
-            if (identifierEqual(name, local.name)) {
+            if (name.identifierEquals(local.name)) {
                 return self.errorAtPrevious(
                     error.InvalidSyntax,
                     "Already a variable with this name in this scope.",
@@ -459,6 +467,8 @@ const Parser = struct {
 
     fn markInitialized(self: *Parser) void {
         const c = self.compiler;
+        // Skip global.
+        if (c.scope_depth == 0) return;
         c.locals[c.local_count - 1].depth = c.scope_depth;
     }
 
@@ -474,6 +484,24 @@ const Parser = struct {
             @intFromEnum(OpCode.define_global),
             global,
         );
+    }
+
+    fn argumentList(self: *Parser, allocator: Allocator) Error!u8 {
+        var arg_count: u8 = 0;
+        if (!self.check(.right_paren)) {
+            while (true) : (arg_count += 1) {
+                try self.expression(allocator);
+                if (arg_count == 255) {
+                    return self.errorAtPrevious(
+                        error.TooManyElements,
+                        "Can't have more than 255 arguments.",
+                    );
+                }
+                if (!try self.match(.comma)) break;
+            }
+        }
+        try self.consume(.right_paren, "Expect ')' after arguments.");
+        return arg_count;
     }
 
     fn @"and"(self: *Parser, allocator: Allocator, _: bool) Error!void {
@@ -498,8 +526,54 @@ const Parser = struct {
         try self.consume(.right_brace, "Expect '}' after block.");
     }
 
+    fn function(self: *Parser, allocator: Allocator, function_type: FunctionType) Error!void {
+        var compiler = try Compiler.init(
+            allocator,
+            self.gc,
+            self.previous.lexeme,
+            self.compiler,
+            function_type,
+        );
+        self.compiler = &compiler;
+        self.beginScope();
+
+        try self.consume(.left_paren, "Expect '(' after function name.");
+        if (!self.check(.right_paren)) {
+            while (true) {
+                if (self.compiler.function.?.arity == 255) {
+                    return self.errorAtCurrent(
+                        error.TooManyElements,
+                        "Can't have more than 255 parameters.",
+                    );
+                }
+                self.compiler.function.?.arity += 1;
+                const constant = try self.parseVariable(allocator, "Expect parameter name.");
+                try self.defineVariable(allocator, constant);
+                if (!try self.match(.comma)) break;
+            }
+        }
+        try self.consume(.right_paren, "Expect ')' after parameters.");
+        try self.consume(.left_brace, "Expect '{' before function body.");
+        try self.block(allocator);
+
+        const obj_function = try self.endCompiler(allocator);
+        try self.emitBytes(
+            allocator,
+            @intFromEnum(OpCode.constant),
+            try self.makeConstant(allocator, .{ .obj = &obj_function.obj }),
+        );
+    }
+
+    fn funDeclaration(self: *Parser, allocator: Allocator) Error!void {
+        const global = try self.parseVariable(allocator, "Expect function name.");
+        // To support recursive local functions, mark it "initalized" as soon as compile the name.
+        self.markInitialized();
+        try self.function(allocator, .function);
+        try self.defineVariable(allocator, global);
+    }
+
     fn varDeclaration(self: *Parser, allocator: Allocator) Error!void {
-        const global = try self.parseVariable(allocator, "Expect variable name");
+        const global = try self.parseVariable(allocator, "Expect variable name.");
 
         if (try self.match(.equal)) {
             try self.expression(allocator);
@@ -513,7 +587,9 @@ const Parser = struct {
     }
 
     pub fn declaration(self: *Parser, allocator: Allocator) Error!void {
-        if (try self.match(.@"var")) {
+        if (try self.match(.fun)) {
+            try self.funDeclaration(allocator);
+        } else if (try self.match(.@"var")) {
             try self.varDeclaration(allocator);
         } else {
             try self.statement(allocator);
@@ -671,6 +747,7 @@ const FunctionType = enum {
 };
 
 pub const Compiler = struct {
+    enclosing: ?*Compiler,
     function: ?*ObjFunction,
     function_type: FunctionType,
 
@@ -680,10 +757,17 @@ pub const Compiler = struct {
 
     pub const u8_count = std.math.maxInt(u8) + 1;
 
-    pub fn init(allocator: Allocator, gc: *GC, function_type: FunctionType) Allocator.Error!@This() {
+    pub fn init(
+        allocator: Allocator,
+        gc: *GC,
+        name: ?[]const u8,
+        enclosing: ?*Compiler,
+        function_type: FunctionType,
+    ) Allocator.Error!@This() {
         var new = Compiler{
-            // Set null beforehand to prevent GC from running on uninitialized "function"
-            // when calling ObjFunction.create.
+            .enclosing = enclosing,
+            // Set null beforehand to prevent GC from running on
+            // uninitialized "function" when calling ObjFunction.create.
             .function = null,
             .function_type = function_type,
             .locals = undefined,
@@ -691,6 +775,9 @@ pub const Compiler = struct {
             .scope_depth = 0,
         };
         new.function = try ObjFunction.create(allocator, gc);
+        if (function_type != .script) {
+            new.function.?.name = try ObjString.createByCopy(allocator, gc, name.?);
+        }
 
         const local = &new.locals[new.local_count];
         new.local_count += 1;
@@ -702,7 +789,13 @@ pub const Compiler = struct {
 };
 
 pub fn compile(allocator: Allocator, gc: *GC, source: []const u8) Error!*const ObjFunction {
-    var compiler = try Compiler.init(allocator, gc, .script);
+    var compiler = try Compiler.init(
+        allocator,
+        gc,
+        null,
+        null,
+        .script,
+    );
     var parser = Parser.init(source, &compiler, gc);
 
     var first_error: ?Error = null;

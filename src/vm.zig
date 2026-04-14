@@ -234,5 +234,8 @@ pub const VM = struct {
         frame.slots = self.stack.items.ptr;
 
         try self.run(allocator);
+
+        // TODO: pop <script>
+        _ = self.pop();
     }
 };

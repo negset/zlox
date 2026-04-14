@@ -52,6 +52,11 @@ pub const Token = struct {
     token_type: TokenType,
     lexeme: []const u8,
     line: u32,
+
+    pub fn identifierEquals(self: Token, other: Token) bool {
+        if (self.lexeme.len != other.lexeme.len) return false;
+        return std.mem.eql(u8, self.lexeme, other.lexeme);
+    }
 };
 
 pub const Scanner = struct {

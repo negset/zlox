@@ -30,7 +30,7 @@ pub const Obj = struct {
 
 pub const ObjFunction = struct {
     obj: Obj,
-    arity: u32,
+    arity: u8,
     chunk: Chunk,
     // Null if it is top-level code.
     name: ?*const ObjString,
