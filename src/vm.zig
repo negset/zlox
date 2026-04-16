@@ -15,7 +15,7 @@ const config = @import("config");
 const frames_max = 64;
 const stack_max = frames_max * Compiler.u8_count;
 
-pub const RuntimeError = error{InvalidOperand} || Allocator.Error;
+pub const RuntimeError = error{ InvalidOperand, Overflow } || Allocator.Error;
 pub const Error = RuntimeError || compiler.Error;
 
 const CallFrame = struct {
@@ -30,8 +30,8 @@ const CallFrame = struct {
 
     pub fn readShort(self: *CallFrame) u16 {
         defer self.ip += 2;
-        const buf = self.function.chunk.code.items[self.ip .. self.ip + 2];
-        return std.mem.readInt(u16, buf[0..2], .big);
+        const buf = self.function.chunk.code.items[self.ip..][0..2];
+        return std.mem.readInt(u16, buf, .big);
     }
 
     pub fn readConstant(self: *CallFrame) Value {
@@ -69,10 +69,20 @@ pub const VM = struct {
     }
 
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
-        const frame = &self.frames[self.frame_count - 1];
-        const line = frame.function.chunk.lines.items[frame.ip - 1];
-        std.debug.print("[line {d}] {s} (runtime): ", .{ line, @errorName(err) });
+        std.debug.print("{s} (runtime): ", .{@errorName(err)});
         std.debug.print(fmt ++ "\n", args);
+
+        for (0..self.frame_count) |i| {
+            const frame = &self.frames[self.frame_count - i - 1];
+            const function = frame.function;
+            const instruction = frame.ip - 1;
+            std.debug.print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
+            if (function.name) |name| {
+                std.debug.print("{s}()\n", .{name.string});
+            } else {
+                std.debug.print("script\n", .{});
+            }
+        }
 
         self.resetStack();
         return err;
@@ -90,6 +100,46 @@ pub const VM = struct {
         return self.stack.items[self.stack.items.len - 1 - distance];
     }
 
+    fn call(self: *VM, function: *const ObjFunction, arg_count: u8) RuntimeError!void {
+        if (arg_count != function.arity) {
+            return self.runtimeError(
+                error.InvalidOperand,
+                "Expected {d} arguments but got {d}.",
+                .{ function.arity, arg_count },
+            );
+        }
+
+        if (self.frame_count == frames_max) {
+            return self.runtimeError(
+                error.Overflow,
+                "Stack overflow.",
+                .{},
+            );
+        }
+
+        const frame = &self.frames[self.frame_count];
+        frame.function = function;
+        frame.ip = 0;
+        // The frame starts at stack_top - (arg_count + 1),
+        // pointing to the function followed by its arguments.
+        frame.slots = (self.stack.items.ptr + self.stack.items.len) - (arg_count + 1);
+        self.frame_count += 1;
+    }
+
+    fn callValue(self: *VM, callee: Value, arg_count: u8) RuntimeError!void {
+        if (callee == .obj) {
+            switch (callee.obj.obj_type) {
+                .function => return try self.call(callee.obj.as(ObjFunction), arg_count),
+                else => {}, // Non-callable object type.
+            }
+        }
+        return self.runtimeError(
+            error.InvalidOperand,
+            "Can only call functions and classes.",
+            .{},
+        );
+    }
+
     fn concatenate(self: *VM, allocator: Allocator) Allocator.Error!void {
         const b = self.pop().obj.as(ObjString).string;
         const a = self.pop().obj.as(ObjString).string;
@@ -100,7 +150,7 @@ pub const VM = struct {
     }
 
     fn run(self: *VM, allocator: Allocator) RuntimeError!void {
-        const frame = &self.frames[self.frame_count - 1];
+        var frame = &self.frames[self.frame_count - 1];
 
         while (true) {
             if (comptime config.trace_execution) {
@@ -180,7 +230,11 @@ pub const VM = struct {
                 .not => self.push(.{ .bool = self.pop().isFalsey() }),
                 .negate => switch (self.peek(0)) {
                     .number => self.push(.{ .number = -(self.pop().number) }),
-                    else => return self.runtimeError(error.InvalidOperand, "Operand must be a number.", .{}),
+                    else => return self.runtimeError(
+                        error.InvalidOperand,
+                        "Operand must be a number.",
+                        .{},
+                    ),
                 },
                 .print => {
                     self.pop().print();
@@ -198,9 +252,25 @@ pub const VM = struct {
                     const distance = frame.readShort();
                     frame.ip -= distance;
                 },
+                .call => {
+                    const arg_count = frame.readByte();
+                    try self.callValue(self.peek(arg_count), arg_count);
+                    frame = &self.frames[self.frame_count - 1];
+                },
                 .@"return" => {
-                    // Exit interpreter.
-                    return;
+                    const result = self.pop();
+                    self.frame_count -= 1;
+                    if (self.frame_count == 0) {
+                        // Exit interpreter.
+                        _ = self.pop();
+                        return;
+                    }
+
+                    // Discard call frame.
+                    const len = frame.slots - self.stack.items.ptr;
+                    self.stack.shrinkRetainingCapacity(len);
+                    self.push(result);
+                    frame = &self.frames[self.frame_count - 1];
                 },
             }
         }
@@ -208,7 +278,11 @@ pub const VM = struct {
 
     fn binaryOp(self: *VM, comptime instruction: OpCode) RuntimeError!void {
         if (self.peek(0) != .number or self.peek(1) != .number) {
-            return self.runtimeError(error.InvalidOperand, "Operands must be numbers.", .{});
+            return self.runtimeError(
+                error.InvalidOperand,
+                "Operands must be numbers.",
+                .{},
+            );
         }
         const b = self.pop().number;
         const a = self.pop().number;
@@ -227,15 +301,8 @@ pub const VM = struct {
         const function = try compiler.compile(allocator, &self.gc, source);
 
         self.push(Value{ .obj = &function.obj });
-        const frame = &self.frames[self.frame_count];
-        self.frame_count += 1;
-        frame.function = function;
-        frame.ip = 0;
-        frame.slots = self.stack.items.ptr;
+        try self.call(function, 0);
 
         try self.run(allocator);
-
-        // TODO: pop <script>
-        _ = self.pop();
     }
 };

@@ -1,5 +1,7 @@
-var breakfast = "beignets";
-var beverage = "cafe au lait";
-breakfast = "beignets with " + beverage;
+fun add(x, y) {
+    print x + y;
+}
 
-print breakfast;
+add(4.4, 6.6);
+
+add("hello", " world");

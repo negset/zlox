@@ -29,6 +29,7 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         => constantInstruction(@tagName(instruction), chunk, offset),
         .get_local,
         .set_local,
+        .call,
         => byteInstruction(@tagName(instruction), chunk, offset),
         .jump,
         .jump_if_false,
@@ -59,8 +60,8 @@ fn byteInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
 }
 
 fn jumpInstruction(name: []const u8, comptime is_forward: bool, chunk: *const Chunk, offset: usize) usize {
-    const buf = chunk.code.items[offset + 1 ..];
-    const distance = std.mem.readInt(u16, buf[0..2], .big);
+    const buf = chunk.code.items[offset + 1 ..][0..2];
+    const distance = std.mem.readInt(u16, buf, .big);
     const dest = if (is_forward) offset + 3 + distance else offset + 3 - distance;
     std.debug.print("{s:<16} {d:>4} -> {d}\n", .{ name, offset, dest });
     return offset + 3;

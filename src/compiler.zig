@@ -184,6 +184,7 @@ const Parser = struct {
     }
 
     fn emitReturn(self: *Parser, allocator: Allocator) Error!void {
+        try self.emitOps(allocator, &.{.nil});
         try self.emitOps(allocator, &.{.@"return"});
     }
 
@@ -220,8 +221,8 @@ const Parser = struct {
         }
 
         // Patch jump distance into previously emitted one.
-        const buf = self.currentChunk().code.items[target..];
-        std.mem.writeInt(u16, buf[0..2], @intCast(distance), .big);
+        const buf = self.currentChunk().code.items[target..][0..2];
+        std.mem.writeInt(u16, buf, @intCast(distance), .big);
     }
 
     pub fn endCompiler(self: *Parser, allocator: Allocator) Error!*const ObjFunction {
@@ -489,7 +490,7 @@ const Parser = struct {
     fn argumentList(self: *Parser, allocator: Allocator) Error!u8 {
         var arg_count: u8 = 0;
         if (!self.check(.right_paren)) {
-            while (true) : (arg_count += 1) {
+            while (true) {
                 try self.expression(allocator);
                 if (arg_count == 255) {
                     return self.errorAtPrevious(
@@ -497,6 +498,7 @@ const Parser = struct {
                         "Can't have more than 255 arguments.",
                     );
                 }
+                arg_count += 1;
                 if (!try self.match(.comma)) break;
             }
         }
