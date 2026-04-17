@@ -604,6 +604,23 @@ const Parser = struct {
         try self.emitOps(allocator, &.{.print});
     }
 
+    fn returnStatement(self: *Parser, allocator: Allocator) Error!void {
+        if (self.compiler.function_type == .script) {
+            return self.errorAtPrevious(
+                error.InvalidSyntax,
+                "Can't return from top-level code.",
+            );
+        }
+
+        if (try self.match(.semicolon)) {
+            try self.emitReturn(allocator);
+        } else {
+            try self.expression(allocator);
+            try self.consume(.semicolon, "Expect ';' after return value.");
+            try self.emitOps(allocator, &.{.@"return"});
+        }
+    }
+
     fn whileStatement(self: *Parser, allocator: Allocator) Error!void {
         const loop_start = self.currentChunk().code.items.len;
         try self.consume(.left_paren, "Expect '(' after 'while'.");
@@ -705,6 +722,8 @@ const Parser = struct {
             try self.forStatement(allocator);
         } else if (try self.match(.@"if")) {
             try self.ifStatement(allocator);
+        } else if (try self.match(.@"return")) {
+            try self.returnStatement(allocator);
         } else if (try self.match(.@"while")) {
             try self.whileStatement(allocator);
         } else if (try self.match(.left_brace)) {
@@ -768,8 +787,8 @@ pub const Compiler = struct {
     ) Allocator.Error!@This() {
         var new = Compiler{
             .enclosing = enclosing,
-            // Set null beforehand to prevent GC from running on
-            // uninitialized "function" when calling ObjFunction.create.
+            // To prevent GC from collecting uninitialized "function"
+            // when calling "ObjFunction.create", set it null beforehand.
             .function = null,
             .function_type = function_type,
             .locals = undefined,

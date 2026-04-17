@@ -6,6 +6,7 @@ const Value = @import("value.zig").Value;
 
 pub const ObjType = enum {
     function,
+    native,
     string,
 };
 
@@ -23,6 +24,7 @@ pub const Obj = struct {
     pub fn print(self: *const Obj) void {
         switch (self.obj_type) {
             .function => self.as(ObjFunction).print(),
+            .native => self.as(ObjNative).print(),
             .string => self.as(ObjString).print(),
         }
     }
@@ -52,12 +54,35 @@ pub const ObjFunction = struct {
         // Don't need to free "name" because GC manages it.
     }
 
-    pub fn print(self: @This()) void {
+    pub fn print(self: *const @This()) void {
         if (self.name) |name| {
             std.debug.print("<fn {s}>", .{name.string});
         } else {
             std.debug.print("<script>", .{});
         }
+    }
+};
+
+pub const NativeFn = *const fn (arg_count: u8, args: [*]Value) Value;
+
+pub const ObjNative = struct {
+    obj: Obj,
+    function: NativeFn,
+
+    pub const obj_type = ObjType.native;
+
+    pub fn create(allocator: Allocator, gc: *GC, function: NativeFn) Allocator.Error!*@This() {
+        const new = try gc.createObject(allocator, @This());
+        new.function = function;
+        return new;
+    }
+
+    pub fn destory(self: *const @This(), allocator: Allocator) void {
+        allocator.destroy(self);
+    }
+
+    pub fn print(_: *const @This()) void {
+        std.debug.print("<native fn>", .{});
     }
 };
 

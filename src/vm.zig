@@ -7,6 +7,8 @@ const Compiler = @import("compiler.zig").Compiler;
 const GC = @import("memory.zig").GC;
 const Obj = @import("object.zig").Obj;
 const ObjFunction = @import("object.zig").ObjFunction;
+const ObjNative = @import("object.zig").ObjNative;
+const NativeFn = @import("object.zig").NativeFn;
 const ObjString = @import("object.zig").ObjString;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
@@ -50,12 +52,14 @@ pub const VM = struct {
     gc: GC,
 
     pub fn init(allocator: Allocator) Allocator.Error!VM {
-        return .{
+        var new = VM{
             .frames = undefined,
             .frame_count = 0,
             .stack = try .initCapacity(allocator, stack_max),
             .gc = .init,
         };
+        try new.defineNative(allocator, "clock", clockNative);
+        return new;
     }
 
     pub fn deinit(self: *VM, allocator: Allocator) void {
@@ -86,6 +90,21 @@ pub const VM = struct {
 
         self.resetStack();
         return err;
+    }
+
+    fn defineNative(self: *VM, allocator: Allocator, name: []const u8, function: NativeFn) Allocator.Error!void {
+        const obj_string = try ObjString.createByCopy(allocator, &self.gc, name);
+        const obj_native = try ObjNative.create(allocator, &self.gc, function);
+        // To prevent GC from collecting name and function, store them on the stack.
+        self.push(Value{ .obj = &obj_string.obj });
+        self.push(Value{ .obj = &obj_native.obj });
+        try self.gc.globals.put(
+            allocator,
+            self.stack.items[0].obj.as(ObjString),
+            self.stack.items[1],
+        );
+        _ = self.pop();
+        _ = self.pop();
     }
 
     fn push(self: *VM, value: Value) void {
@@ -129,7 +148,20 @@ pub const VM = struct {
     fn callValue(self: *VM, callee: Value, arg_count: u8) RuntimeError!void {
         if (callee == .obj) {
             switch (callee.obj.obj_type) {
-                .function => return try self.call(callee.obj.as(ObjFunction), arg_count),
+                .function => {
+                    try self.call(callee.obj.as(ObjFunction), arg_count);
+                    return;
+                },
+                .native => {
+                    const native = callee.obj.as(ObjNative);
+                    const args = self.stack.items.ptr + self.stack.items.len - arg_count;
+                    const result = native.function(arg_count, args);
+                    // Discard args and native function name.
+                    const len = self.stack.items.len - (arg_count + 1);
+                    self.stack.shrinkRetainingCapacity(len);
+                    self.push(result);
+                    return;
+                },
                 else => {}, // Non-callable object type.
             }
         }
@@ -191,7 +223,8 @@ pub const VM = struct {
                 },
                 .define_global => {
                     const name = frame.readString();
-                    // To avoid GC, pop value after put it to the table.
+                    // To prevent GC from collecting the value when calling "globals.put",
+                    // use "peek" instead of "pop".
                     try self.gc.globals.put(allocator, name, self.peek(0));
                     _ = self.pop();
                 },
@@ -306,3 +339,7 @@ pub const VM = struct {
         try self.run(allocator);
     }
 };
+
+fn clockNative(_: u8, _: [*]Value) Value {
+    return Value{ .number = @floatFromInt(std.time.timestamp()) };
+}

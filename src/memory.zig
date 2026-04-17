@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Obj = @import("object.zig").Obj;
 const ObjFunction = @import("object.zig").ObjFunction;
+const ObjNative = @import("object.zig").ObjNative;
 const ObjString = @import("object.zig").ObjString;
 const ObjStringContext = @import("object.zig").ObjStringContext;
 const Value = @import("value.zig").Value;
@@ -39,6 +40,7 @@ pub const GC = struct {
     fn freeObject(allocator: Allocator, obj: *Obj) void {
         switch (obj.obj_type) {
             .function => obj.as(ObjFunction).destory(allocator),
+            .native => obj.as(ObjNative).destory(allocator),
             .string => obj.as(ObjString).destroy(allocator),
         }
     }
