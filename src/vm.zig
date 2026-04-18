@@ -50,13 +50,15 @@ pub const VM = struct {
     frame_count: usize,
     stack: std.ArrayList(Value),
     gc: GC,
+    io: std.Io,
 
-    pub fn init(allocator: Allocator) Allocator.Error!VM {
+    pub fn init(allocator: Allocator, io: std.Io) Allocator.Error!VM {
         var new = VM{
             .frames = undefined,
             .frame_count = 0,
             .stack = try .initCapacity(allocator, stack_max),
             .gc = .init,
+            .io = io,
         };
         try new.defineNative(allocator, "clock", clockNative);
         return new;
@@ -65,6 +67,10 @@ pub const VM = struct {
     pub fn deinit(self: *VM, allocator: Allocator) void {
         self.stack.deinit(allocator);
         self.gc.deinit(allocator);
+    }
+
+    fn clockNative(self: *VM, _: u8, _: [*]Value) Value {
+        return Value{ .number = @floatFromInt(std.Io.Clock.real.now(self.io).toSeconds()) };
     }
 
     fn resetStack(self: *VM) void {
@@ -155,7 +161,7 @@ pub const VM = struct {
                 .native => {
                     const native = callee.obj.as(ObjNative);
                     const args = self.stack.items.ptr + self.stack.items.len - arg_count;
-                    const result = native.function(arg_count, args);
+                    const result = native.function(self, arg_count, args);
                     // Discard args and native function name.
                     const len = self.stack.items.len - (arg_count + 1);
                     self.stack.shrinkRetainingCapacity(len);
@@ -339,7 +345,3 @@ pub const VM = struct {
         try self.run(allocator);
     }
 };
-
-fn clockNative(_: u8, _: [*]Value) Value {
-    return Value{ .number = @floatFromInt(std.time.timestamp()) };
-}

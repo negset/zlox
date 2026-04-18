@@ -5,23 +5,15 @@ const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = gpa.allocator();
-    defer {
-        const deinit_status = gpa.deinit();
-        if (deinit_status == .leak) @panic("Memory leak.");
-    }
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    var vm = try VM.init(allocator);
-    defer vm.deinit(allocator);
+    var vm = try VM.init(init.gpa, init.io);
+    defer vm.deinit(init.gpa);
 
     switch (args.len) {
-        1 => repl(allocator, &vm),
-        2 => runFile(allocator, &vm, args[1]),
+        1 => repl(init.gpa, init.io, &vm),
+        2 => runFile(init.gpa, init.io, &vm, args[1]),
         else => {
             std.debug.print("Usage: zlox [path]\n", .{});
             std.process.exit(64);
@@ -29,9 +21,9 @@ pub fn main() !void {
     }
 }
 
-fn repl(allocator: Allocator, vm: *VM) void {
+fn repl(allocator: Allocator, io: std.Io, vm: *VM) void {
     var stdin_buf: [1024]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+    var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buf);
     const stdin = &stdin_reader.interface;
     while (true) {
         std.debug.print("> ", .{});
@@ -46,21 +38,21 @@ fn repl(allocator: Allocator, vm: *VM) void {
     }
 }
 
-fn readFile(allocator: Allocator, path: []const u8) ![]const u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+fn readFile(allocator: Allocator, io: std.Io, path: []const u8) ![]const u8 {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
-    const file_size = try file.getEndPos();
+    const file_size = try file.length(io);
 
     var file_buffer: [1024]u8 = undefined;
-    var file_reader = file.reader(&file_buffer);
+    var file_reader = file.reader(io, &file_buffer);
 
     const contents = try file_reader.interface.readAlloc(allocator, file_size);
     return contents;
 }
 
-fn runFile(allocator: Allocator, vm: *VM, path: []const u8) void {
-    const source = readFile(allocator, path) catch |err| {
+fn runFile(allocator: Allocator, io: std.Io, vm: *VM, path: []const u8) void {
+    const source = readFile(allocator, io, path) catch |err| {
         std.debug.print("Could not read file \"{s}\": {}", .{ path, err });
         std.process.exit(74);
     };
