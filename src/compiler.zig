@@ -140,23 +140,28 @@ const Parser = struct {
         return true;
     }
 
-    fn emitByte(self: *Parser, gpa: Allocator, byte: u8) Error!void {
-        try self.currentChunk().write(gpa, byte, self.previous.line);
-    }
-
-    fn emitBytes(self: *Parser, gpa: Allocator, byte1: u8, byte2: u8) Error!void {
-        try self.emitByte(gpa, byte1);
-        try self.emitByte(gpa, byte2);
-    }
-
-    fn emitOps(self: *Parser, gpa: Allocator, ops: []const OpCode) Error!void {
-        for (ops) |op| {
-            try self.emitByte(gpa, @intFromEnum(op));
+    fn emit(self: *Parser, gpa: Allocator, data: anytype) Error!void {
+        const T = @TypeOf(data);
+        switch (@typeInfo(T)) {
+            .int => |i| {
+                if (i.bits != 8) @compileError("Unsupported int bits to emit.");
+                try self.currentChunk().write(gpa, @intCast(data), self.previous.line);
+            },
+            .@"enum" => |e| {
+                if (e.tag_type != u8) @compileError("Unsupported enum type to emit.");
+                try self.currentChunk().write(gpa, @intFromEnum(data), self.previous.line);
+            },
+            .@"struct" => |s| {
+                inline for (s.fields) |field| {
+                    try self.emit(gpa, @field(data, field.name));
+                }
+            },
+            else => @compileError("Unsupported type to emit: " ++ @typeName(T)),
         }
     }
 
     fn emitLoop(self: *Parser, gpa: Allocator, loop_start: usize) Error!void {
-        try self.emitOps(gpa, &.{.loop});
+        try self.emit(gpa, OpCode.loop);
 
         // +2 to take into account the loop distance itself.
         const distance = self.currentChunk().code.items.len - loop_start + 2;
@@ -167,25 +172,20 @@ const Parser = struct {
             );
         }
 
-        try self.emitBytes(
-            gpa,
-            @truncate(distance >> 8),
-            @truncate(distance),
-        );
+        try self.emit(gpa, .{ @as(u8, @truncate(distance >> 8)), @as(u8, @truncate(distance)) });
     }
 
     fn emitJump(self: *Parser, gpa: Allocator, instruction: OpCode) Error!usize {
-        try self.emitByte(gpa, @intFromEnum(instruction));
+        try self.emit(gpa, instruction);
         // Emit temporary jump distance.
-        try self.emitByte(gpa, 0xff);
-        try self.emitByte(gpa, 0xff);
+        try self.emit(gpa, @as(u8, 0xff));
+        try self.emit(gpa, @as(u8, 0xff));
         // Return offset of jump distance.
         return self.currentChunk().code.items.len - 2;
     }
 
     fn emitReturn(self: *Parser, gpa: Allocator) Error!void {
-        try self.emitOps(gpa, &.{.nil});
-        try self.emitOps(gpa, &.{.@"return"});
+        try self.emit(gpa, .{ OpCode.nil, OpCode.@"return" });
     }
 
     fn makeConstant(self: *Parser, gpa: Allocator, value: Value) Error!u8 {
@@ -202,11 +202,8 @@ const Parser = struct {
     }
 
     fn emitConstant(self: *Parser, gpa: Allocator, value: Value) Error!void {
-        try self.emitBytes(
-            gpa,
-            @intFromEnum(OpCode.constant),
-            try self.makeConstant(gpa, value),
-        );
+        const constant = try self.makeConstant(gpa, value);
+        try self.emit(gpa, .{ OpCode.constant, constant });
     }
 
     fn patchJump(self: *Parser, target: usize) Error!void {
@@ -250,7 +247,7 @@ const Parser = struct {
 
         // Pop locals.
         while (c.local_count > 0 and c.locals[c.local_count - 1].depth.? > c.scope_depth) : (c.local_count -= 1) {
-            try self.emitOps(gpa, &.{.pop});
+            try self.emit(gpa, OpCode.pop);
         }
     }
 
@@ -258,37 +255,33 @@ const Parser = struct {
         const operator_type = self.previous.token_type;
         const rule = rules.get(operator_type);
         try self.parsePrecedence(gpa, rule.precedence.next());
-        try self.emitOps(gpa, switch (operator_type) {
-            .minus => &.{.subtract},
-            .plus => &.{.add},
-            .slash => &.{.divide},
-            .star => &.{.multiply},
-            .bang_equal => &.{ .equal, .not },
-            .equal_equal => &.{.equal},
-            .greater => &.{.greater},
-            .greater_equal => &.{ .less, .not },
-            .less => &.{.less},
-            .less_equal => &.{ .greater, .not },
+        switch (operator_type) {
+            .minus => try self.emit(gpa, OpCode.subtract),
+            .plus => try self.emit(gpa, OpCode.add),
+            .slash => try self.emit(gpa, OpCode.divide),
+            .star => try self.emit(gpa, OpCode.multiply),
+            .bang_equal => try self.emit(gpa, .{ OpCode.equal, OpCode.not }),
+            .equal_equal => try self.emit(gpa, OpCode.equal),
+            .greater => try self.emit(gpa, OpCode.greater),
+            .greater_equal => try self.emit(gpa, .{ OpCode.less, OpCode.not }),
+            .less => try self.emit(gpa, OpCode.less),
+            .less_equal => try self.emit(gpa, .{ OpCode.greater, OpCode.not }),
             else => unreachable,
-        });
+        }
     }
 
     fn call(self: *Parser, gpa: Allocator, _: bool) Error!void {
         const arg_count = try self.argumentList(gpa);
-        try self.emitBytes(
-            gpa,
-            @intFromEnum(OpCode.call),
-            arg_count,
-        );
+        try self.emit(gpa, .{ OpCode.call, arg_count });
     }
 
     fn literal(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        try self.emitOps(gpa, switch (self.previous.token_type) {
-            .false => &.{.false},
-            .nil => &.{.nil},
-            .true => &.{.true},
+        switch (self.previous.token_type) {
+            .false => try self.emit(gpa, OpCode.false),
+            .nil => try self.emit(gpa, OpCode.nil),
+            .true => try self.emit(gpa, OpCode.true),
             else => unreachable,
-        });
+        }
     }
 
     fn grouping(self: *Parser, gpa: Allocator, _: bool) Error!void {
@@ -308,7 +301,7 @@ const Parser = struct {
 
         try self.patchJump(else_jump);
         // Discard the left operand when it is falsey.
-        try self.emitOps(gpa, &.{.pop});
+        try self.emit(gpa, OpCode.pop);
 
         try self.parsePrecedence(gpa, .@"or");
         try self.patchJump(end_jump);
@@ -337,17 +330,9 @@ const Parser = struct {
 
         if (can_assign and try self.match(.equal)) {
             try self.expression(gpa);
-            try self.emitBytes(
-                gpa,
-                @intFromEnum(set_op),
-                arg,
-            );
+            try self.emit(gpa, .{ set_op, arg });
         } else {
-            try self.emitBytes(
-                gpa,
-                @intFromEnum(get_op),
-                arg,
-            );
+            try self.emit(gpa, .{ get_op, arg });
         }
     }
 
@@ -363,8 +348,8 @@ const Parser = struct {
 
         // Emit the operator instruction.
         switch (operator_type) {
-            .minus => try self.emitOps(gpa, &.{.negate}),
-            .bang => try self.emitOps(gpa, &.{.not}),
+            .minus => try self.emit(gpa, OpCode.negate),
+            .bang => try self.emit(gpa, OpCode.not),
             else => unreachable,
         }
     }
@@ -480,11 +465,7 @@ const Parser = struct {
             return;
         }
 
-        try self.emitBytes(
-            gpa,
-            @intFromEnum(OpCode.define_global),
-            global,
-        );
+        try self.emit(gpa, .{ OpCode.define_global, global });
     }
 
     fn argumentList(self: *Parser, gpa: Allocator) Error!u8 {
@@ -510,7 +491,7 @@ const Parser = struct {
         const end_jump = try self.emitJump(gpa, .jump_if_false);
 
         // Discard the left operand when it is truthy.
-        try self.emitOps(gpa, &.{.pop});
+        try self.emit(gpa, OpCode.pop);
         try self.parsePrecedence(gpa, .@"and");
 
         try self.patchJump(end_jump);
@@ -559,11 +540,8 @@ const Parser = struct {
         try self.block(gpa);
 
         const obj_function = try self.endCompiler(gpa);
-        try self.emitBytes(
-            gpa,
-            @intFromEnum(OpCode.constant),
-            try self.makeConstant(gpa, .{ .obj = &obj_function.obj }),
-        );
+        const constant = try self.makeConstant(gpa, .{ .obj = &obj_function.obj });
+        try self.emit(gpa, .{ OpCode.constant, constant });
     }
 
     fn funDeclaration(self: *Parser, gpa: Allocator) Error!void {
@@ -581,7 +559,7 @@ const Parser = struct {
             try self.expression(gpa);
         } else {
             // Implicit initialization
-            try self.emitOps(gpa, &.{.nil});
+            try self.emit(gpa, OpCode.nil);
         }
         try self.consume(.semicolon, "Expect ';' after variable declaration.");
 
@@ -601,7 +579,7 @@ const Parser = struct {
     fn printStatement(self: *Parser, gpa: Allocator) Error!void {
         try self.expression(gpa);
         try self.consume(.semicolon, "Expect ';' after value.");
-        try self.emitOps(gpa, &.{.print});
+        try self.emit(gpa, OpCode.print);
     }
 
     fn returnStatement(self: *Parser, gpa: Allocator) Error!void {
@@ -617,7 +595,7 @@ const Parser = struct {
         } else {
             try self.expression(gpa);
             try self.consume(.semicolon, "Expect ';' after return value.");
-            try self.emitOps(gpa, &.{.@"return"});
+            try self.emit(gpa, OpCode.@"return");
         }
     }
 
@@ -629,19 +607,19 @@ const Parser = struct {
 
         const exit_jump = try self.emitJump(gpa, .jump_if_false);
         // Discard the condition when it is truthy.
-        try self.emitOps(gpa, &.{.pop});
+        try self.emit(gpa, OpCode.pop);
         try self.statement(gpa);
         try self.emitLoop(gpa, loop_start);
 
         try self.patchJump(exit_jump);
         // Discard the condition when it is falsey.
-        try self.emitOps(gpa, &.{.pop});
+        try self.emit(gpa, OpCode.pop);
     }
 
     fn expressionStatement(self: *Parser, gpa: Allocator) Error!void {
         try self.expression(gpa);
         try self.consume(.semicolon, "Expect ';' after expression.");
-        try self.emitOps(gpa, &.{.pop});
+        try self.emit(gpa, OpCode.pop);
     }
 
     fn forStatement(self: *Parser, gpa: Allocator) Error!void {
@@ -666,7 +644,7 @@ const Parser = struct {
             // Jump out of the loop if the condition is false.
             exit_jump = try self.emitJump(gpa, .jump_if_false);
             // Discard the condition when it is truthy.
-            try self.emitOps(gpa, &.{.pop});
+            try self.emit(gpa, OpCode.pop);
         }
 
         // Increment clause is optional.
@@ -675,7 +653,7 @@ const Parser = struct {
             const increment_start = self.currentChunk().code.items.len;
             try self.expression(gpa);
             // Discard the increment result.
-            try self.emitOps(gpa, &.{.pop});
+            try self.emit(gpa, OpCode.pop);
             try self.consume(.right_paren, "Expect ')' after for clauses.");
 
             try self.emitLoop(gpa, loop_start);
@@ -689,7 +667,7 @@ const Parser = struct {
         if (exit_jump) |_| {
             try self.patchJump(exit_jump.?);
             // Discard the condition when it is falsey.
-            try self.emitOps(gpa, &.{.pop});
+            try self.emit(gpa, OpCode.pop);
         }
 
         try self.endScope(gpa);
@@ -702,14 +680,14 @@ const Parser = struct {
 
         const then_jump = try self.emitJump(gpa, .jump_if_false);
         // Discard the condition when it is truthy.
-        try self.emitOps(gpa, &.{.pop});
+        try self.emit(gpa, OpCode.pop);
         try self.statement(gpa);
 
         const else_jump = try self.emitJump(gpa, .jump);
 
         try self.patchJump(then_jump);
         // Discard the condition when it is falsey.
-        try self.emitOps(gpa, &.{.pop});
+        try self.emit(gpa, OpCode.pop);
 
         if (try self.match(.@"else")) try self.statement(gpa);
         try self.patchJump(else_jump);
