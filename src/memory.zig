@@ -19,38 +19,38 @@ pub const GC = struct {
         .objects = null,
     };
 
-    pub fn deinit(self: *GC, allocator: Allocator) void {
-        self.freeObjects(allocator);
-        self.globals.deinit(allocator);
-        self.strings.deinit(allocator);
+    pub fn deinit(self: *GC, gpa: Allocator) void {
+        self.freeObjects(gpa);
+        self.globals.deinit(gpa);
+        self.strings.deinit(gpa);
     }
 
-    pub fn createObject(self: *GC, allocator: Allocator, comptime T: type) Allocator.Error!*T {
+    pub fn createObject(self: *GC, gpa: Allocator, comptime T: type) Allocator.Error!*T {
         if (comptime !@hasField(T, "obj")) {
             @compileError("Unknown object type: " ++ @typeName(T));
         }
 
-        const new = try allocator.create(T);
+        const new = try gpa.create(T);
         new.obj.obj_type = T.obj_type;
         new.obj.next = self.objects;
         self.objects = &new.obj;
         return new;
     }
 
-    fn freeObject(allocator: Allocator, obj: *Obj) void {
+    fn freeObject(gpa: Allocator, obj: *Obj) void {
         switch (obj.obj_type) {
-            .function => obj.as(ObjFunction).destory(allocator),
-            .native => obj.as(ObjNative).destory(allocator),
-            .string => obj.as(ObjString).destroy(allocator),
+            .function => obj.as(ObjFunction).destory(gpa),
+            .native => obj.as(ObjNative).destory(gpa),
+            .string => obj.as(ObjString).destroy(gpa),
         }
     }
 
-    pub fn freeObjects(self: *GC, allocator: Allocator) void {
+    pub fn freeObjects(self: *GC, gpa: Allocator) void {
         var object = self.objects;
         var next: ?*Obj = undefined;
         while (object != null) : (object = next) {
             next = object.?.next;
-            freeObject(allocator, object.?);
+            freeObject(gpa, object.?);
         }
     }
 

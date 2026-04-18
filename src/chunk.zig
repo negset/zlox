@@ -41,19 +41,19 @@ pub const Chunk = struct {
         .constants = .empty,
     };
 
-    pub fn deinit(self: *Chunk, allocator: Allocator) void {
-        self.code.deinit(allocator);
-        self.lines.deinit(allocator);
-        self.constants.deinit(allocator);
+    pub fn deinit(self: *Chunk, gpa: Allocator) void {
+        self.code.deinit(gpa);
+        self.lines.deinit(gpa);
+        self.constants.deinit(gpa);
     }
 
-    pub fn write(self: *Chunk, allocator: Allocator, byte: u8, line: u32) Allocator.Error!void {
-        try self.code.append(allocator, byte);
-        try self.lines.append(allocator, line);
+    pub fn write(self: *Chunk, gpa: Allocator, byte: u8, line: u32) Allocator.Error!void {
+        try self.code.append(gpa, byte);
+        try self.lines.append(gpa, line);
     }
 
-    pub fn addConstant(self: *Chunk, allocator: Allocator, value: Value) Allocator.Error!usize {
-        try self.constants.append(allocator, value);
+    pub fn addConstant(self: *Chunk, gpa: Allocator, value: Value) Allocator.Error!usize {
+        try self.constants.append(gpa, value);
         return self.constants.items.len - 1;
     }
 };

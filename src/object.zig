@@ -40,18 +40,18 @@ pub const ObjFunction = struct {
 
     pub const obj_type = ObjType.function;
 
-    pub fn create(allocator: Allocator, gc: *GC) Allocator.Error!*@This() {
-        const new = try gc.createObject(allocator, @This());
+    pub fn create(gpa: Allocator, gc: *GC) Allocator.Error!*@This() {
+        const new = try gc.createObject(gpa, @This());
         new.arity = 0;
         new.name = null;
         new.chunk = Chunk.empty;
         return new;
     }
 
-    pub fn destory(self: *const @This(), allocator: Allocator) void {
+    pub fn destory(self: *const @This(), gpa: Allocator) void {
         var chunk = self.chunk;
-        chunk.deinit(allocator);
-        allocator.destroy(self);
+        chunk.deinit(gpa);
+        gpa.destroy(self);
         // Don't need to free "name" because GC manages it.
     }
 
@@ -72,14 +72,14 @@ pub const ObjNative = struct {
 
     pub const obj_type = ObjType.native;
 
-    pub fn create(allocator: Allocator, gc: *GC, function: NativeFn) Allocator.Error!*@This() {
-        const new = try gc.createObject(allocator, @This());
+    pub fn create(gpa: Allocator, gc: *GC, function: NativeFn) Allocator.Error!*@This() {
+        const new = try gc.createObject(gpa, @This());
         new.function = function;
         return new;
     }
 
-    pub fn destory(self: *const @This(), allocator: Allocator) void {
-        allocator.destroy(self);
+    pub fn destory(self: *const @This(), gpa: Allocator) void {
+        gpa.destroy(self);
     }
 
     pub fn print(_: *const @This()) void {
@@ -94,37 +94,37 @@ pub const ObjString = struct {
 
     pub const obj_type = ObjType.string;
 
-    fn create(allocator: Allocator, gc: *GC, string: []const u8, hash: u64) Allocator.Error!*const @This() {
-        const new = try gc.createObject(allocator, @This());
+    fn create(gpa: Allocator, gc: *GC, string: []const u8, hash: u64) Allocator.Error!*const @This() {
+        const new = try gc.createObject(gpa, @This());
         new.string = string;
         new.hash = hash;
-        try gc.strings.put(allocator, new, Value{ .nil = {} });
+        try gc.strings.put(gpa, new, Value{ .nil = {} });
         return new;
     }
 
-    pub fn createByCopy(allocator: Allocator, gc: *GC, string: []const u8) Allocator.Error!*const @This() {
+    pub fn createByCopy(gpa: Allocator, gc: *GC, string: []const u8) Allocator.Error!*const @This() {
         const hash = std.hash.Fnv1a_64.hash(string);
         if (gc.findString(string, hash)) |interned| {
             return interned;
         }
 
-        const copied = try allocator.dupe(u8, string);
-        return create(allocator, gc, copied, hash);
+        const copied = try gpa.dupe(u8, string);
+        return create(gpa, gc, copied, hash);
     }
 
-    pub fn createByTake(allocator: Allocator, gc: *GC, string: []const u8) Allocator.Error!*const @This() {
+    pub fn createByTake(gpa: Allocator, gc: *GC, string: []const u8) Allocator.Error!*const @This() {
         const hash = std.hash.Fnv1a_64.hash(string);
         if (gc.findString(string, hash)) |interned| {
-            allocator.free(string);
+            gpa.free(string);
             return interned;
         }
 
-        return create(allocator, gc, string, hash);
+        return create(gpa, gc, string, hash);
     }
 
-    pub fn destroy(self: *const @This(), allocator: Allocator) void {
-        allocator.free(self.string);
-        allocator.destroy(self);
+    pub fn destroy(self: *const @This(), gpa: Allocator) void {
+        gpa.free(self.string);
+        gpa.destroy(self);
     }
 
     pub fn print(self: *const @This()) void {

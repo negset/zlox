@@ -52,21 +52,21 @@ pub const VM = struct {
     gc: GC,
     io: std.Io,
 
-    pub fn init(allocator: Allocator, io: std.Io) Allocator.Error!VM {
+    pub fn init(gpa: Allocator, io: std.Io) Allocator.Error!VM {
         var new = VM{
             .frames = undefined,
             .frame_count = 0,
-            .stack = try .initCapacity(allocator, stack_max),
+            .stack = try .initCapacity(gpa, stack_max),
             .gc = .init,
             .io = io,
         };
-        try new.defineNative(allocator, "clock", clockNative);
+        try new.defineNative(gpa, "clock", clockNative);
         return new;
     }
 
-    pub fn deinit(self: *VM, allocator: Allocator) void {
-        self.stack.deinit(allocator);
-        self.gc.deinit(allocator);
+    pub fn deinit(self: *VM, gpa: Allocator) void {
+        self.stack.deinit(gpa);
+        self.gc.deinit(gpa);
     }
 
     fn clockNative(self: *VM, _: u8, _: [*]Value) Value {
@@ -98,14 +98,14 @@ pub const VM = struct {
         return err;
     }
 
-    fn defineNative(self: *VM, allocator: Allocator, name: []const u8, function: NativeFn) Allocator.Error!void {
-        const obj_string = try ObjString.createByCopy(allocator, &self.gc, name);
-        const obj_native = try ObjNative.create(allocator, &self.gc, function);
+    fn defineNative(self: *VM, gpa: Allocator, name: []const u8, function: NativeFn) Allocator.Error!void {
+        const obj_string = try ObjString.createByCopy(gpa, &self.gc, name);
+        const obj_native = try ObjNative.create(gpa, &self.gc, function);
         // To prevent GC from collecting name and function, store them on the stack.
         self.push(Value{ .obj = &obj_string.obj });
         self.push(Value{ .obj = &obj_native.obj });
         try self.gc.globals.put(
-            allocator,
+            gpa,
             self.stack.items[0].obj.as(ObjString),
             self.stack.items[1],
         );
@@ -178,16 +178,16 @@ pub const VM = struct {
         );
     }
 
-    fn concatenate(self: *VM, allocator: Allocator) Allocator.Error!void {
+    fn concatenate(self: *VM, gpa: Allocator) Allocator.Error!void {
         const b = self.pop().obj.as(ObjString).string;
         const a = self.pop().obj.as(ObjString).string;
-        const string = try std.mem.concat(allocator, u8, &.{ a, b });
+        const string = try std.mem.concat(gpa, u8, &.{ a, b });
 
-        const result = try ObjString.createByTake(allocator, &self.gc, string);
+        const result = try ObjString.createByTake(gpa, &self.gc, string);
         self.push(Value{ .obj = &result.obj });
     }
 
-    fn run(self: *VM, allocator: Allocator) RuntimeError!void {
+    fn run(self: *VM, gpa: Allocator) RuntimeError!void {
         var frame = &self.frames[self.frame_count - 1];
 
         while (true) {
@@ -231,7 +231,7 @@ pub const VM = struct {
                     const name = frame.readString();
                     // To prevent GC from collecting the value when calling "globals.put",
                     // use "peek" instead of "pop".
-                    try self.gc.globals.put(allocator, name, self.peek(0));
+                    try self.gc.globals.put(gpa, name, self.peek(0));
                     _ = self.pop();
                 },
                 .set_global => {
@@ -254,7 +254,7 @@ pub const VM = struct {
                 .less => try self.binaryOp(.less),
                 .add => {
                     if (self.peek(0).isObjType(.string) and self.peek(1).isObjType(.string)) {
-                        try self.concatenate(allocator);
+                        try self.concatenate(gpa);
                     } else if (self.peek(0) == .number and self.peek(1) == .number) {
                         try self.binaryOp(.add);
                     } else return self.runtimeError(
@@ -336,12 +336,12 @@ pub const VM = struct {
         });
     }
 
-    pub fn interpret(self: *VM, allocator: Allocator, source: []const u8) Error!void {
-        const function = try compiler.compile(allocator, &self.gc, source);
+    pub fn interpret(self: *VM, gpa: Allocator, source: []const u8) Error!void {
+        const function = try compiler.compile(gpa, &self.gc, source);
 
         self.push(Value{ .obj = &function.obj });
         try self.call(function, 0);
 
-        try self.run(allocator);
+        try self.run(gpa);
     }
 };
