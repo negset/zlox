@@ -143,12 +143,12 @@ const Parser = struct {
     fn emit(self: *Parser, gpa: Allocator, data: anytype) Error!void {
         const T = @TypeOf(data);
         switch (@typeInfo(T)) {
-            .int => |i| {
-                if (i.bits != 8) @compileError("Unsupported int bits to emit.");
+            .int => {
+                if (T != u8) @compileError("Incompatible int type to emit: " ++ @typeName(T));
                 try self.currentChunk().write(gpa, @intCast(data), self.previous.line);
             },
-            .@"enum" => |e| {
-                if (e.tag_type != u8) @compileError("Unsupported enum type to emit.");
+            .@"enum" => {
+                if (T != OpCode) @compileError("Incompatible enum type to emit: " ++ @typeName(T));
                 try self.currentChunk().write(gpa, @intFromEnum(data), self.previous.line);
             },
             .@"struct" => |s| {
@@ -156,7 +156,7 @@ const Parser = struct {
                     try self.emit(gpa, @field(data, field.name));
                 }
             },
-            else => @compileError("Unsupported type to emit: " ++ @typeName(T)),
+            else => @compileError("Incompatible type to emit: " ++ @typeName(T)),
         }
     }
 
