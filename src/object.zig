@@ -130,16 +130,16 @@ pub const ObjString = struct {
     pub fn print(self: *const @This()) void {
         std.debug.print("{s}", .{self.string});
     }
-};
 
-pub const ObjStringContext = struct {
-    pub fn hash(_: @This(), obj_string: *const ObjString) u64 {
-        return obj_string.hash;
-    }
+    pub const Context = struct {
+        pub fn hash(_: @This(), obj_string: *const ObjString) u64 {
+            return obj_string.hash;
+        }
 
-    pub fn eql(_: @This(), a: *const ObjString, b: *const ObjString) bool {
-        if (a == b) return true;
-        if (a.string.len != b.string.len) return false;
-        return std.mem.eql(u8, a.string, b.string);
-    }
+        pub fn eql(_: @This(), a: *const ObjString, b: *const ObjString) bool {
+            if (a == b) return true;
+            if (a.string.len != b.string.len) return false;
+            return std.mem.eql(u8, a.string, b.string);
+        }
+    };
 };
