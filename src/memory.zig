@@ -43,8 +43,8 @@ pub const GC = struct {
 
     fn freeObject(gpa: Allocator, obj: *Obj) void {
         switch (obj.obj_type) {
-            .function => obj.as(ObjFunction).destory(gpa),
-            .native => obj.as(ObjNative).destory(gpa),
+            .function => obj.as(ObjFunction).destroy(gpa),
+            .native => obj.as(ObjNative).destroy(gpa),
             .string => obj.as(ObjString).destroy(gpa),
         }
     }

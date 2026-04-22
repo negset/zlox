@@ -48,7 +48,7 @@ pub const ObjFunction = struct {
         return new;
     }
 
-    pub fn destory(self: *const @This(), gpa: Allocator) void {
+    pub fn destroy(self: *const @This(), gpa: Allocator) void {
         var chunk = self.chunk;
         chunk.deinit(gpa);
         gpa.destroy(self);
@@ -78,7 +78,7 @@ pub const ObjNative = struct {
         return new;
     }
 
-    pub fn destory(self: *const @This(), gpa: Allocator) void {
+    pub fn destroy(self: *const @This(), gpa: Allocator) void {
         gpa.destroy(self);
     }
 
