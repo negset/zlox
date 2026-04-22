@@ -9,24 +9,38 @@ pub const ObjType = enum {
     function,
     native,
     string,
+
+    pub fn Impl(comptime obj_type: ObjType) type {
+        return switch (obj_type) {
+            .function => ObjFunction,
+            .native => ObjNative,
+            .string => ObjString,
+        };
+    }
 };
 
 pub const Obj = struct {
     obj_type: ObjType,
     next: ?*Obj,
 
-    pub fn as(self: *const Obj, comptime T: type) *const T {
-        const type_ok = @hasDecl(T, "obj_type") and T.obj_type == self.obj_type;
-        if (!type_ok) @panic("Invalid type cast: " ++ @typeName(T));
+    pub fn as(self: *const Obj, comptime obj_type: ObjType) *const obj_type.Impl() {
+        if (self.obj_type != obj_type) @panic("Invalid Obj cast.");
+        return @ptrCast(self);
+    }
 
-        return @alignCast(@fieldParentPtr("obj", self));
+    pub fn destroy(self: *const Obj, gpa: Allocator) void {
+        switch (self.obj_type) {
+            inline else => |obj_type| {
+                self.as(obj_type).destroy(gpa);
+            },
+        }
     }
 
     pub fn print(self: *const Obj) void {
         switch (self.obj_type) {
-            .function => self.as(ObjFunction).print(),
-            .native => self.as(ObjNative).print(),
-            .string => self.as(ObjString).print(),
+            inline else => |obj_type| {
+                self.as(obj_type).print();
+            },
         }
     }
 };
@@ -38,10 +52,8 @@ pub const ObjFunction = struct {
     // Null if it is top-level code.
     name: ?*const ObjString,
 
-    pub const obj_type = ObjType.function;
-
     pub fn create(gpa: Allocator, gc: *GC) Allocator.Error!*@This() {
-        const new = try gc.createObject(gpa, @This());
+        const new = try gc.createObject(gpa, .function);
         new.arity = 0;
         new.name = null;
         new.chunk = Chunk.empty;
@@ -64,17 +76,15 @@ pub const ObjFunction = struct {
     }
 };
 
-pub const NativeFn = *const fn (vm: *VM, arg_count: u8, args: [*]Value) Value;
-
 pub const ObjNative = struct {
     obj: Obj,
-    function: NativeFn,
+    native_fn: NativeFn,
 
-    pub const obj_type = ObjType.native;
+    pub const NativeFn = *const fn (vm: *VM, arg_count: u8, args: [*]Value) Value;
 
-    pub fn create(gpa: Allocator, gc: *GC, function: NativeFn) Allocator.Error!*@This() {
-        const new = try gc.createObject(gpa, @This());
-        new.function = function;
+    pub fn create(gpa: Allocator, gc: *GC, native_fn: NativeFn) Allocator.Error!*const @This() {
+        const new = try gc.createObject(gpa, .native);
+        new.native_fn = native_fn;
         return new;
     }
 
@@ -92,10 +102,8 @@ pub const ObjString = struct {
     string: []const u8,
     hash: u64,
 
-    pub const obj_type = ObjType.string;
-
     fn create(gpa: Allocator, gc: *GC, string: []const u8, hash: u64) Allocator.Error!*const @This() {
-        const new = try gc.createObject(gpa, @This());
+        const new = try gc.createObject(gpa, .string);
         new.string = string;
         new.hash = hash;
         try gc.strings.put(gpa, new, Value{ .nil = {} });

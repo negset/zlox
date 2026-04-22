@@ -8,7 +8,6 @@ const GC = @import("memory.zig").GC;
 const Obj = @import("object.zig").Obj;
 const ObjFunction = @import("object.zig").ObjFunction;
 const ObjNative = @import("object.zig").ObjNative;
-const NativeFn = @import("object.zig").NativeFn;
 const ObjString = @import("object.zig").ObjString;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
@@ -41,7 +40,7 @@ const CallFrame = struct {
     }
 
     pub fn readString(self: *CallFrame) *const ObjString {
-        return self.readConstant().obj.as(ObjString);
+        return self.readConstant().obj.as(.string);
     }
 };
 
@@ -98,15 +97,15 @@ pub const VM = struct {
         return err;
     }
 
-    fn defineNative(self: *VM, gpa: Allocator, name: []const u8, function: NativeFn) Allocator.Error!void {
+    fn defineNative(self: *VM, gpa: Allocator, name: []const u8, native_fn: ObjNative.NativeFn) Allocator.Error!void {
         const obj_string = try ObjString.createByCopy(gpa, &self.gc, name);
-        const obj_native = try ObjNative.create(gpa, &self.gc, function);
+        const obj_native = try ObjNative.create(gpa, &self.gc, native_fn);
         // To prevent GC from collecting name and function, store them on the stack.
         self.push(Value{ .obj = &obj_string.obj });
         self.push(Value{ .obj = &obj_native.obj });
         try self.gc.globals.put(
             gpa,
-            self.stack.items[0].obj.as(ObjString),
+            self.stack.items[0].obj.as(.string),
             self.stack.items[1],
         );
         _ = self.pop();
@@ -155,13 +154,13 @@ pub const VM = struct {
         if (callee == .obj) {
             switch (callee.obj.obj_type) {
                 .function => {
-                    try self.call(callee.obj.as(ObjFunction), arg_count);
+                    try self.call(callee.obj.as(.function), arg_count);
                     return;
                 },
                 .native => {
-                    const native = callee.obj.as(ObjNative);
+                    const native = callee.obj.as(.native);
                     const args = self.stack.items.ptr + self.stack.items.len - arg_count;
-                    const result = native.function(self, arg_count, args);
+                    const result = native.native_fn(self, arg_count, args);
                     // Discard args and native function name.
                     const len = self.stack.items.len - (arg_count + 1);
                     self.stack.shrinkRetainingCapacity(len);
@@ -179,8 +178,8 @@ pub const VM = struct {
     }
 
     fn concatenate(self: *VM, gpa: Allocator) Allocator.Error!void {
-        const b = self.pop().obj.as(ObjString).string;
-        const a = self.pop().obj.as(ObjString).string;
+        const b = self.pop().obj.as(.string).string;
+        const a = self.pop().obj.as(.string).string;
         const string = try std.mem.concat(gpa, u8, &.{ a, b });
 
         const result = try ObjString.createByTake(gpa, &self.gc, string);
@@ -202,8 +201,7 @@ pub const VM = struct {
                 _ = debug.disassembleInstruction(&frame.function.chunk, frame.ip);
             }
 
-            const instruction: OpCode = @enumFromInt(frame.readByte());
-            switch (instruction) {
+            switch (@as(OpCode, @enumFromInt(frame.readByte()))) {
                 .constant => self.push(frame.readConstant()),
                 .nil => self.push(.{ .nil = {} }),
                 .true => self.push(.{ .bool = true }),
@@ -250,8 +248,12 @@ pub const VM = struct {
                     const a = self.pop();
                     self.push(.{ .bool = a.equals(b) });
                 },
-                .greater => try self.binaryOp(.greater),
-                .less => try self.binaryOp(.less),
+                inline .greater,
+                .less,
+                .subtract,
+                .multiply,
+                .divide,
+                => |instruction| try self.binaryOp(instruction),
                 .add => {
                     if (self.peek(0).isObjType(.string) and self.peek(1).isObjType(.string)) {
                         try self.concatenate(gpa);
@@ -263,9 +265,6 @@ pub const VM = struct {
                         .{},
                     );
                 },
-                .subtract => try self.binaryOp(.subtract),
-                .multiply => try self.binaryOp(.multiply),
-                .divide => try self.binaryOp(.divide),
                 .not => self.push(.{ .bool = self.pop().isFalsey() }),
                 .negate => switch (self.peek(0)) {
                     .number => self.push(.{ .number = -(self.pop().number) }),
@@ -325,7 +324,8 @@ pub const VM = struct {
         }
         const b = self.pop().number;
         const a = self.pop().number;
-        self.push(switch (instruction) {
+
+        self.push(switch (comptime instruction) {
             .add => .{ .number = a + b },
             .subtract => .{ .number = a - b },
             .multiply => .{ .number = a * b },

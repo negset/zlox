@@ -1,21 +1,21 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ObjType = @import("object.zig").ObjType;
 const Obj = @import("object.zig").Obj;
-const ObjFunction = @import("object.zig").ObjFunction;
-const ObjNative = @import("object.zig").ObjNative;
 const ObjString = @import("object.zig").ObjString;
 const Value = @import("value.zig").Value;
-const Table = std.HashMapUnmanaged(
-    *const ObjString,
-    Value,
-    ObjString.Context,
-    75,
-);
 
 pub const GC = struct {
     globals: Table,
     strings: Table,
     objects: ?*Obj,
+
+    const Table = std.HashMapUnmanaged(
+        *const ObjString,
+        Value,
+        ObjString.Context,
+        75,
+    );
 
     pub const init = GC{
         .globals = .empty,
@@ -29,33 +29,22 @@ pub const GC = struct {
         self.strings.deinit(gpa);
     }
 
-    pub fn createObject(self: *GC, gpa: Allocator, comptime T: type) Allocator.Error!*T {
-        if (comptime !@hasField(T, "obj")) {
-            @compileError("Unknown object type: " ++ @typeName(T));
-        }
-
-        const new = try gpa.create(T);
-        new.obj.obj_type = T.obj_type;
+    pub fn createObject(self: *GC, gpa: Allocator, comptime obj_type: ObjType) Allocator.Error!*obj_type.Impl() {
+        const new = try gpa.create(obj_type.Impl());
+        new.obj.obj_type = obj_type;
         new.obj.next = self.objects;
         self.objects = &new.obj;
         return new;
     }
 
-    fn freeObject(gpa: Allocator, obj: *Obj) void {
-        switch (obj.obj_type) {
-            .function => obj.as(ObjFunction).destroy(gpa),
-            .native => obj.as(ObjNative).destroy(gpa),
-            .string => obj.as(ObjString).destroy(gpa),
-        }
-    }
-
     pub fn freeObjects(self: *GC, gpa: Allocator) void {
-        var object = self.objects;
-        var next: ?*Obj = undefined;
-        while (object != null) : (object = next) {
-            next = object.?.next;
-            freeObject(gpa, object.?);
+        var curr = self.objects;
+        while (curr) |obj| {
+            const next = obj.next;
+            obj.destroy(gpa);
+            curr = next;
         }
+        self.objects = null;
     }
 
     pub fn findString(self: *GC, string: []const u8, hash: u64) ?*const ObjString {
