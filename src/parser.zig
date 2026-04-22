@@ -44,29 +44,6 @@ const ParseRule = struct {
     precedence: Precedence = .none,
 };
 
-const rules = std.EnumArray(TokenType, ParseRule).initDefault(.{}, .{
-    .left_paren = .{ .prefix = Parser.grouping, .infix = Parser.call, .precedence = .call },
-    .minus = .{ .prefix = Parser.unary, .infix = Parser.binary, .precedence = .term },
-    .plus = .{ .infix = Parser.binary, .precedence = .term },
-    .slash = .{ .infix = Parser.binary, .precedence = .factor },
-    .star = .{ .infix = Parser.binary, .precedence = .factor },
-    .bang = .{ .prefix = Parser.unary },
-    .bang_equal = .{ .infix = Parser.binary, .precedence = .equality },
-    .equal_equal = .{ .infix = Parser.binary, .precedence = .equality },
-    .greater = .{ .infix = Parser.binary, .precedence = .comparison },
-    .greater_equal = .{ .infix = Parser.binary, .precedence = .comparison },
-    .less = .{ .infix = Parser.binary, .precedence = .comparison },
-    .less_equal = .{ .infix = Parser.binary, .precedence = .comparison },
-    .identifier = .{ .prefix = Parser.variable },
-    .string = .{ .prefix = Parser.string },
-    .number = .{ .prefix = Parser.number },
-    .@"and" = .{ .infix = Parser.@"and", .precedence = .@"and" },
-    .false = .{ .prefix = Parser.literal },
-    .true = .{ .prefix = Parser.literal },
-    .nil = .{ .prefix = Parser.literal },
-    .@"or" = .{ .infix = Parser.@"or", .precedence = .@"or" },
-});
-
 pub const Parser = struct {
     scanner: Scanner,
     compiler: *Compiler = undefined,
@@ -252,137 +229,6 @@ pub const Parser = struct {
         }
     }
 
-    fn binary(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        const operator_type = self.previous.token_type;
-        const rule = rules.get(operator_type);
-        try self.parsePrecedence(gpa, rule.precedence.next());
-        switch (operator_type) {
-            .minus => try self.emit(gpa, OpCode.subtract),
-            .plus => try self.emit(gpa, OpCode.add),
-            .slash => try self.emit(gpa, OpCode.divide),
-            .star => try self.emit(gpa, OpCode.multiply),
-            .bang_equal => try self.emit(gpa, .{ OpCode.equal, OpCode.not }),
-            .equal_equal => try self.emit(gpa, OpCode.equal),
-            .greater => try self.emit(gpa, OpCode.greater),
-            .greater_equal => try self.emit(gpa, .{ OpCode.less, OpCode.not }),
-            .less => try self.emit(gpa, OpCode.less),
-            .less_equal => try self.emit(gpa, .{ OpCode.greater, OpCode.not }),
-            else => unreachable,
-        }
-    }
-
-    fn call(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        const arg_count = try self.argumentList(gpa);
-        try self.emit(gpa, .{ OpCode.call, arg_count });
-    }
-
-    fn literal(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        switch (self.previous.token_type) {
-            .false => try self.emit(gpa, OpCode.false),
-            .nil => try self.emit(gpa, OpCode.nil),
-            .true => try self.emit(gpa, OpCode.true),
-            else => unreachable,
-        }
-    }
-
-    fn grouping(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        try self.expression(gpa);
-        try self.consume(.right_paren, "Expect ')' after expression.");
-    }
-
-    fn number(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        const value = std.fmt.parseFloat(f64, self.previous.lexeme) catch
-            @panic("Invalid number.");
-        try self.emitConstant(gpa, .{ .number = value });
-    }
-
-    fn @"or"(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        const else_jump = try self.emitJump(gpa, .jump_if_false);
-        const end_jump = try self.emitJump(gpa, .jump);
-
-        try self.patchJump(else_jump);
-        // Discard the left operand when it is falsey.
-        try self.emit(gpa, OpCode.pop);
-
-        try self.parsePrecedence(gpa, .@"or");
-        try self.patchJump(end_jump);
-    }
-
-    fn string(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        // Trim double quotes.
-        const str = self.previous.lexeme[1 .. self.previous.lexeme.len - 1];
-        const obj_string = try ObjString.createByCopy(gpa, self.gc, str);
-        try self.emitConstant(gpa, .{ .obj = &obj_string.obj });
-    }
-
-    fn namedVariable(self: *Parser, gpa: Allocator, name: Token, can_assign: bool) Error!void {
-        var get_op: OpCode = undefined;
-        var set_op: OpCode = undefined;
-        var arg: u8 = undefined;
-        if (try self.resolveLocal(self.compiler, name)) |local| {
-            get_op = .get_local;
-            set_op = .set_local;
-            arg = local;
-        } else {
-            get_op = .get_global;
-            set_op = .set_global;
-            arg = try self.identifierConstant(gpa, name);
-        }
-
-        if (can_assign and try self.match(.equal)) {
-            try self.expression(gpa);
-            try self.emit(gpa, .{ set_op, arg });
-        } else {
-            try self.emit(gpa, .{ get_op, arg });
-        }
-    }
-
-    fn variable(self: *Parser, gpa: Allocator, can_assign: bool) Error!void {
-        try self.namedVariable(gpa, self.previous, can_assign);
-    }
-
-    fn unary(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        const operator_type = self.previous.token_type;
-
-        // Compile the operand.
-        try self.parsePrecedence(gpa, .unary);
-
-        // Emit the operator instruction.
-        switch (operator_type) {
-            .minus => try self.emit(gpa, OpCode.negate),
-            .bang => try self.emit(gpa, OpCode.not),
-            else => unreachable,
-        }
-    }
-
-    fn parsePrecedence(self: *Parser, gpa: Allocator, precedence: Precedence) Error!void {
-        try self.advance();
-
-        const can_assign = precedence.le(.assignment);
-
-        if (rules.get(self.previous.token_type).prefix) |prefix_rule| {
-            try prefix_rule(self, gpa, can_assign);
-        } else {
-            return self.errorAtPrevious(
-                error.InvalidSyntax,
-                "Expect expression.",
-            );
-        }
-
-        while (precedence.le(rules.get(self.current.token_type).precedence)) {
-            try self.advance();
-            const infix_rule = rules.get(self.previous.token_type).infix;
-            try infix_rule.?(self, gpa, can_assign);
-        }
-
-        if (can_assign and try self.match(.equal)) {
-            return self.errorAtPrevious(
-                error.InvalidSyntax,
-                "Invalid assignment target.",
-            );
-        }
-    }
-
     fn identifierConstant(self: *Parser, gpa: Allocator, name: Token) Error!u8 {
         const obj_string = try ObjString.createByCopy(gpa, self.gc, name.lexeme);
         return self.makeConstant(gpa, .{ .obj = &obj_string.obj });
@@ -498,6 +344,163 @@ pub const Parser = struct {
         try self.patchJump(end_jump);
     }
 
+    fn binary(self: *Parser, gpa: Allocator, _: bool) Error!void {
+        const operator_type = self.previous.token_type;
+        const rule = getRule(operator_type);
+        try self.parsePrecedence(gpa, rule.precedence.next());
+        switch (operator_type) {
+            .minus => try self.emit(gpa, OpCode.subtract),
+            .plus => try self.emit(gpa, OpCode.add),
+            .slash => try self.emit(gpa, OpCode.divide),
+            .star => try self.emit(gpa, OpCode.multiply),
+            .bang_equal => try self.emit(gpa, .{ OpCode.equal, OpCode.not }),
+            .equal_equal => try self.emit(gpa, OpCode.equal),
+            .greater => try self.emit(gpa, OpCode.greater),
+            .greater_equal => try self.emit(gpa, .{ OpCode.less, OpCode.not }),
+            .less => try self.emit(gpa, OpCode.less),
+            .less_equal => try self.emit(gpa, .{ OpCode.greater, OpCode.not }),
+            else => unreachable,
+        }
+    }
+
+    fn call(self: *Parser, gpa: Allocator, _: bool) Error!void {
+        const arg_count = try self.argumentList(gpa);
+        try self.emit(gpa, .{ OpCode.call, arg_count });
+    }
+
+    fn literal(self: *Parser, gpa: Allocator, _: bool) Error!void {
+        switch (self.previous.token_type) {
+            .false => try self.emit(gpa, OpCode.false),
+            .nil => try self.emit(gpa, OpCode.nil),
+            .true => try self.emit(gpa, OpCode.true),
+            else => unreachable,
+        }
+    }
+
+    fn grouping(self: *Parser, gpa: Allocator, _: bool) Error!void {
+        try self.expression(gpa);
+        try self.consume(.right_paren, "Expect ')' after expression.");
+    }
+
+    fn number(self: *Parser, gpa: Allocator, _: bool) Error!void {
+        const value = std.fmt.parseFloat(f64, self.previous.lexeme) catch
+            @panic("Invalid number.");
+        try self.emitConstant(gpa, .{ .number = value });
+    }
+
+    fn @"or"(self: *Parser, gpa: Allocator, _: bool) Error!void {
+        const else_jump = try self.emitJump(gpa, .jump_if_false);
+        const end_jump = try self.emitJump(gpa, .jump);
+
+        try self.patchJump(else_jump);
+        // Discard the left operand when it is falsey.
+        try self.emit(gpa, OpCode.pop);
+
+        try self.parsePrecedence(gpa, .@"or");
+        try self.patchJump(end_jump);
+    }
+
+    fn string(self: *Parser, gpa: Allocator, _: bool) Error!void {
+        // Trim double quotes.
+        const str = self.previous.lexeme[1 .. self.previous.lexeme.len - 1];
+        const obj_string = try ObjString.createByCopy(gpa, self.gc, str);
+        try self.emitConstant(gpa, .{ .obj = &obj_string.obj });
+    }
+
+    fn namedVariable(self: *Parser, gpa: Allocator, name: Token, can_assign: bool) Error!void {
+        var get_op: OpCode = undefined;
+        var set_op: OpCode = undefined;
+        var arg: u8 = undefined;
+        if (try self.resolveLocal(self.compiler, name)) |local| {
+            get_op = .get_local;
+            set_op = .set_local;
+            arg = local;
+        } else {
+            get_op = .get_global;
+            set_op = .set_global;
+            arg = try self.identifierConstant(gpa, name);
+        }
+
+        if (can_assign and try self.match(.equal)) {
+            try self.expression(gpa);
+            try self.emit(gpa, .{ set_op, arg });
+        } else {
+            try self.emit(gpa, .{ get_op, arg });
+        }
+    }
+
+    fn variable(self: *Parser, gpa: Allocator, can_assign: bool) Error!void {
+        try self.namedVariable(gpa, self.previous, can_assign);
+    }
+
+    fn unary(self: *Parser, gpa: Allocator, _: bool) Error!void {
+        const operator_type = self.previous.token_type;
+
+        // Compile the operand.
+        try self.parsePrecedence(gpa, .unary);
+
+        // Emit the operator instruction.
+        switch (operator_type) {
+            .minus => try self.emit(gpa, OpCode.negate),
+            .bang => try self.emit(gpa, OpCode.not),
+            else => unreachable,
+        }
+    }
+
+    fn parsePrecedence(self: *Parser, gpa: Allocator, precedence: Precedence) Error!void {
+        try self.advance();
+
+        const can_assign = precedence.le(.assignment);
+
+        if (getRule(self.previous.token_type).prefix) |prefix_rule| {
+            try prefix_rule(self, gpa, can_assign);
+        } else {
+            return self.errorAtPrevious(
+                error.InvalidSyntax,
+                "Expect expression.",
+            );
+        }
+
+        while (precedence.le(getRule(self.current.token_type).precedence)) {
+            try self.advance();
+            const infix_rule = getRule(self.previous.token_type).infix;
+            try infix_rule.?(self, gpa, can_assign);
+        }
+
+        if (can_assign and try self.match(.equal)) {
+            return self.errorAtPrevious(
+                error.InvalidSyntax,
+                "Invalid assignment target.",
+            );
+        }
+    }
+
+    pub fn getRule(token_type: TokenType) ParseRule {
+        return switch (token_type) {
+            .left_paren => .{ .prefix = grouping, .infix = call, .precedence = .call },
+            .minus => .{ .prefix = unary, .infix = binary, .precedence = .term },
+            .plus => .{ .infix = binary, .precedence = .term },
+            .slash => .{ .infix = binary, .precedence = .factor },
+            .star => .{ .infix = binary, .precedence = .factor },
+            .bang => .{ .prefix = unary },
+            .bang_equal => .{ .infix = binary, .precedence = .equality },
+            .equal_equal => .{ .infix = binary, .precedence = .equality },
+            .greater => .{ .infix = binary, .precedence = .comparison },
+            .greater_equal => .{ .infix = binary, .precedence = .comparison },
+            .less => .{ .infix = binary, .precedence = .comparison },
+            .less_equal => .{ .infix = binary, .precedence = .comparison },
+            .identifier => .{ .prefix = variable },
+            .string => .{ .prefix = string },
+            .number => .{ .prefix = number },
+            .@"and" => .{ .infix = @"and", .precedence = .@"and" },
+            .false => .{ .prefix = literal },
+            .true => .{ .prefix = literal },
+            .nil => .{ .prefix = literal },
+            .@"or" => .{ .infix = @"or", .precedence = .@"or" },
+            else => .{},
+        };
+    }
+
     fn expression(self: *Parser, gpa: Allocator) Error!void {
         try self.parsePrecedence(gpa, .assignment);
     }
@@ -565,56 +568,6 @@ pub const Parser = struct {
         try self.consume(.semicolon, "Expect ';' after variable declaration.");
 
         try self.defineVariable(gpa, global);
-    }
-
-    pub fn declaration(self: *Parser, gpa: Allocator) Error!void {
-        if (try self.match(.fun)) {
-            try self.funDeclaration(gpa);
-        } else if (try self.match(.@"var")) {
-            try self.varDeclaration(gpa);
-        } else {
-            try self.statement(gpa);
-        }
-    }
-
-    fn printStatement(self: *Parser, gpa: Allocator) Error!void {
-        try self.expression(gpa);
-        try self.consume(.semicolon, "Expect ';' after value.");
-        try self.emit(gpa, OpCode.print);
-    }
-
-    fn returnStatement(self: *Parser, gpa: Allocator) Error!void {
-        if (self.compiler.function_type == .script) {
-            return self.errorAtPrevious(
-                error.InvalidSyntax,
-                "Can't return from top-level code.",
-            );
-        }
-
-        if (try self.match(.semicolon)) {
-            try self.emitReturn(gpa);
-        } else {
-            try self.expression(gpa);
-            try self.consume(.semicolon, "Expect ';' after return value.");
-            try self.emit(gpa, OpCode.@"return");
-        }
-    }
-
-    fn whileStatement(self: *Parser, gpa: Allocator) Error!void {
-        const loop_start = self.currentChunk().code.items.len;
-        try self.consume(.left_paren, "Expect '(' after 'while'.");
-        try self.expression(gpa);
-        try self.consume(.right_paren, "Expect ')' after condition.");
-
-        const exit_jump = try self.emitJump(gpa, .jump_if_false);
-        // Discard the condition when it is truthy.
-        try self.emit(gpa, OpCode.pop);
-        try self.statement(gpa);
-        try self.emitLoop(gpa, loop_start);
-
-        try self.patchJump(exit_jump);
-        // Discard the condition when it is falsey.
-        try self.emit(gpa, OpCode.pop);
     }
 
     fn expressionStatement(self: *Parser, gpa: Allocator) Error!void {
@@ -692,6 +645,56 @@ pub const Parser = struct {
 
         if (try self.match(.@"else")) try self.statement(gpa);
         try self.patchJump(else_jump);
+    }
+
+    fn printStatement(self: *Parser, gpa: Allocator) Error!void {
+        try self.expression(gpa);
+        try self.consume(.semicolon, "Expect ';' after value.");
+        try self.emit(gpa, OpCode.print);
+    }
+
+    fn returnStatement(self: *Parser, gpa: Allocator) Error!void {
+        if (self.compiler.function_type == .script) {
+            return self.errorAtPrevious(
+                error.InvalidSyntax,
+                "Can't return from top-level code.",
+            );
+        }
+
+        if (try self.match(.semicolon)) {
+            try self.emitReturn(gpa);
+        } else {
+            try self.expression(gpa);
+            try self.consume(.semicolon, "Expect ';' after return value.");
+            try self.emit(gpa, OpCode.@"return");
+        }
+    }
+
+    fn whileStatement(self: *Parser, gpa: Allocator) Error!void {
+        const loop_start = self.currentChunk().code.items.len;
+        try self.consume(.left_paren, "Expect '(' after 'while'.");
+        try self.expression(gpa);
+        try self.consume(.right_paren, "Expect ')' after condition.");
+
+        const exit_jump = try self.emitJump(gpa, .jump_if_false);
+        // Discard the condition when it is truthy.
+        try self.emit(gpa, OpCode.pop);
+        try self.statement(gpa);
+        try self.emitLoop(gpa, loop_start);
+
+        try self.patchJump(exit_jump);
+        // Discard the condition when it is falsey.
+        try self.emit(gpa, OpCode.pop);
+    }
+
+    pub fn declaration(self: *Parser, gpa: Allocator) Error!void {
+        if (try self.match(.fun)) {
+            try self.funDeclaration(gpa);
+        } else if (try self.match(.@"var")) {
+            try self.varDeclaration(gpa);
+        } else {
+            try self.statement(gpa);
+        }
     }
 
     fn statement(self: *Parser, gpa: Allocator) Error!void {
