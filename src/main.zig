@@ -2,22 +2,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const VM = @import("vm.zig").VM;
 
-pub fn main(init: std.process.Init) !void {
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
-
-    var vm = try VM.init(init.gpa, init.io);
-    defer vm.deinit(init.gpa);
-
-    switch (args.len) {
-        1 => repl(init.gpa, init.io, &vm),
-        2 => runFile(init.gpa, init.io, &vm, args[1]),
-        else => {
-            std.debug.print("Usage: zlox [path]\n", .{});
-            std.process.exit(64);
-        },
-    }
-}
-
 fn repl(gpa: Allocator, io: std.Io, vm: *VM) void {
     var stdin_buf: [1024]u8 = undefined;
     var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buf);
@@ -63,4 +47,20 @@ fn runFile(gpa: Allocator, io: std.Io, vm: *VM, path: []const u8) void {
         => std.process.exit(65),
         error.OutOfMemory => std.process.exit(71),
     };
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+
+    var vm = try VM.init(init.gpa, init.io);
+    defer vm.deinit(init.gpa);
+
+    switch (args.len) {
+        1 => repl(init.gpa, init.io, &vm),
+        2 => runFile(init.gpa, init.io, &vm, args[1]),
+        else => {
+            std.debug.print("Usage: zlox [path]\n", .{});
+            std.process.exit(64);
+        },
+    }
 }
