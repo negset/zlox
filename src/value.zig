@@ -1,8 +1,6 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const Obj = @import("object.zig").Obj;
 const ObjType = @import("object.zig").ObjType;
-const ObjString = @import("object.zig").ObjString;
 
 pub const Value = union(enum) {
     bool: bool,

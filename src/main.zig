@@ -1,8 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Chunk = @import("chunk.zig").Chunk;
-const OpCode = @import("chunk.zig").OpCode;
-const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
 
 pub fn main(init: std.process.Init) !void {

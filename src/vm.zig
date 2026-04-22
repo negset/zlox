@@ -1,11 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
-const compiler = @import("compiler.zig");
 const Compiler = @import("compiler.zig").Compiler;
+const Parser = @import("parser.zig").Parser;
 const GC = @import("memory.zig").GC;
-const Obj = @import("object.zig").Obj;
 const ObjFunction = @import("object.zig").ObjFunction;
 const ObjNative = @import("object.zig").ObjNative;
 const ObjString = @import("object.zig").ObjString;
@@ -14,10 +12,10 @@ const debug = @import("debug.zig");
 const config = @import("config");
 
 const frames_max = 64;
-const stack_max = frames_max * Compiler.u8_count;
+const stack_max = frames_max * Compiler.locals_max;
 
 pub const RuntimeError = error{ InvalidOperand, Overflow } || Allocator.Error;
-pub const Error = RuntimeError || compiler.Error;
+pub const Error = RuntimeError || Parser.Error;
 
 const CallFrame = struct {
     function: *const ObjFunction,
@@ -337,10 +335,11 @@ pub const VM = struct {
     }
 
     pub fn interpret(self: *VM, gpa: Allocator, source: []const u8) Error!void {
-        const function = try compiler.compile(gpa, &self.gc, source);
+        var parser = Parser.init(source, &self.gc);
+        const script = try parser.run(gpa);
 
-        self.push(Value{ .obj = &function.obj });
-        try self.call(function, 0);
+        self.push(Value{ .obj = &script.obj });
+        try self.call(script, 0);
 
         try self.run(gpa);
     }

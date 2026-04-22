@@ -1,7 +1,6 @@
 const std = @import("std");
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
-const Value = @import("value.zig").Value;
 
 pub fn disassembleChunk(chunk: *const Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
@@ -21,22 +20,23 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
     }
 
     const instruction: OpCode = @enumFromInt(chunk.code.items[offset]);
+    const name = @tagName(instruction);
     return switch (instruction) {
         .constant,
         .get_global,
         .define_global,
         .set_global,
-        => constantInstruction(@tagName(instruction), chunk, offset),
+        => constantInstruction(name, chunk, offset),
         .get_local,
         .set_local,
         .call,
-        => byteInstruction(@tagName(instruction), chunk, offset),
+        => byteInstruction(name, chunk, offset),
         .jump,
         .jump_if_false,
-        => jumpInstruction(@tagName(instruction), true, chunk, offset),
+        => jumpInstruction(name, true, chunk, offset),
         .loop,
-        => jumpInstruction(@tagName(instruction), false, chunk, offset),
-        else => simpleInstruction(@tagName(instruction), offset),
+        => jumpInstruction(name, false, chunk, offset),
+        else => simpleInstruction(name, offset),
     };
 }
 
