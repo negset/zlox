@@ -11,12 +11,6 @@ const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 const config = @import("config");
 
-const frames_max = 64;
-const stack_max = frames_max * Compiler.locals_max;
-
-pub const RuntimeError = error{ InvalidOperand, Overflow } || Allocator.Error;
-pub const Error = RuntimeError || Parser.Error;
-
 const CallFrame = struct {
     function: *const ObjFunction,
     ip: usize,
@@ -48,6 +42,12 @@ pub const VM = struct {
     stack: std.ArrayList(Value),
     gc: GC,
     io: std.Io,
+
+    const RuntimeError = error{ InvalidOperand, StackOverflow } || Allocator.Error;
+    const Error = RuntimeError || Parser.Error;
+
+    const frames_max = 64;
+    const stack_max = frames_max * Compiler.locals_max;
 
     pub fn init(gpa: Allocator, io: std.Io) Allocator.Error!VM {
         var new = VM{
@@ -133,7 +133,7 @@ pub const VM = struct {
 
         if (self.frame_count == frames_max) {
             return self.runtimeError(
-                error.Overflow,
+                error.StackOverflow,
                 "Stack overflow.",
                 .{},
             );

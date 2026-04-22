@@ -59,7 +59,7 @@ fn runFile(gpa: Allocator, io: std.Io, vm: *VM, path: []const u8) void {
         error.InvalidSyntax,
         error.TooManyElements,
         error.InvalidOperand,
-        error.Overflow,
+        error.StackOverflow,
         => std.process.exit(65),
         error.OutOfMemory => std.process.exit(71),
     };
