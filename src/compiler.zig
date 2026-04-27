@@ -11,6 +11,11 @@ const Local = struct {
     depth: ?u32,
 };
 
+const Upvalue = struct {
+    index: u8,
+    is_local: bool,
+};
+
 pub const FunctionType = enum {
     function,
     script,
@@ -21,11 +26,12 @@ pub const Compiler = struct {
     function: ?*ObjFunction,
     function_type: FunctionType,
 
-    locals: [locals_max]Local,
+    locals: [u8_count]Local,
     local_count: u8,
+    upvalues: [u8_count]Upvalue,
     scope_depth: u32,
 
-    pub const locals_max = std.math.maxInt(u8) + 1;
+    pub const u8_count = std.math.maxInt(u8) + 1;
 
     pub fn init(
         gpa: Allocator,
@@ -42,6 +48,7 @@ pub const Compiler = struct {
             .function_type = function_type,
             .locals = undefined,
             .local_count = 0,
+            .upvalues = undefined,
             .scope_depth = 0,
         };
         new.function = try ObjFunction.create(gpa, gc);

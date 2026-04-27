@@ -4,6 +4,7 @@ const OpCode = @import("chunk.zig").OpCode;
 const Compiler = @import("compiler.zig").Compiler;
 const Parser = @import("parser.zig").Parser;
 const GC = @import("memory.zig").GC;
+const ObjClosure = @import("object.zig").ObjClosure;
 const ObjFunction = @import("object.zig").ObjFunction;
 const ObjNative = @import("object.zig").ObjNative;
 const ObjString = @import("object.zig").ObjString;
@@ -12,23 +13,23 @@ const debug = @import("debug.zig");
 const config = @import("config");
 
 const CallFrame = struct {
-    function: *const ObjFunction,
+    closure: *const ObjClosure,
     ip: usize,
     slots: [*]Value,
 
     pub fn readByte(self: *CallFrame) u8 {
         defer self.ip += 1;
-        return self.function.chunk.code.items[self.ip];
+        return self.closure.function.chunk.code.items[self.ip];
     }
 
     pub fn readShort(self: *CallFrame) u16 {
         defer self.ip += 2;
-        const buf = self.function.chunk.code.items[self.ip..][0..2];
+        const buf = self.closure.function.chunk.code.items[self.ip..][0..2];
         return std.mem.readInt(u16, buf, .big);
     }
 
     pub fn readConstant(self: *CallFrame) Value {
-        return self.function.chunk.constants.items[self.readByte()];
+        return self.closure.function.chunk.constants.items[self.readByte()];
     }
 
     pub fn readString(self: *CallFrame) *const ObjString {
@@ -47,7 +48,7 @@ pub const VM = struct {
     const Error = RuntimeError || Parser.Error;
 
     const frames_max = 64;
-    const stack_max = frames_max * Compiler.locals_max;
+    const stack_max = frames_max * Compiler.u8_count;
 
     pub fn init(gpa: Allocator, io: std.Io) Allocator.Error!VM {
         var new = VM{
@@ -81,7 +82,7 @@ pub const VM = struct {
 
         for (0..self.frame_count) |i| {
             const frame = &self.frames[self.frame_count - i - 1];
-            const function = frame.function;
+            const function = frame.closure.function;
             const instruction = frame.ip - 1;
             std.debug.print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
             if (function.name) |name| {
@@ -98,7 +99,7 @@ pub const VM = struct {
     fn defineNative(self: *VM, gpa: Allocator, name: []const u8, native_fn: ObjNative.NativeFn) Allocator.Error!void {
         const obj_string = try ObjString.createByCopy(gpa, &self.gc, name);
         const obj_native = try ObjNative.create(gpa, &self.gc, native_fn);
-        // To prevent GC from collecting name and function, store them on the stack.
+        // To prevent GC from collecting name and function, store them temporarily on the stack.
         self.push(Value{ .obj = &obj_string.obj });
         self.push(Value{ .obj = &obj_native.obj });
         try self.gc.globals.put(
@@ -122,12 +123,12 @@ pub const VM = struct {
         return self.stack.items[self.stack.items.len - 1 - distance];
     }
 
-    fn call(self: *VM, function: *const ObjFunction, arg_count: u8) RuntimeError!void {
-        if (arg_count != function.arity) {
+    fn call(self: *VM, closure: *const ObjClosure, arg_count: u8) RuntimeError!void {
+        if (arg_count != closure.function.arity) {
             return self.runtimeError(
                 error.InvalidOperand,
                 "Expected {d} arguments but got {d}.",
-                .{ function.arity, arg_count },
+                .{ closure.function.arity, arg_count },
             );
         }
 
@@ -140,7 +141,7 @@ pub const VM = struct {
         }
 
         const frame = &self.frames[self.frame_count];
-        frame.function = function;
+        frame.closure = closure;
         frame.ip = 0;
         // The frame starts at stack_top - (arg_count + 1),
         // pointing to the function followed by its arguments.
@@ -151,8 +152,8 @@ pub const VM = struct {
     fn callValue(self: *VM, callee: Value, arg_count: u8) RuntimeError!void {
         if (callee == .obj) {
             switch (callee.obj.obj_type) {
-                .function => {
-                    try self.call(callee.obj.as(.function), arg_count);
+                .closure => {
+                    try self.call(callee.obj.as(.closure), arg_count);
                     return;
                 },
                 .native => {
@@ -196,7 +197,7 @@ pub const VM = struct {
                     std.debug.print(" ]", .{});
                 }
                 std.debug.print("\n", .{});
-                _ = debug.disassembleInstruction(&frame.function.chunk, frame.ip);
+                _ = debug.disassembleInstruction(&frame.closure.function.chunk, frame.ip);
             }
 
             switch (@as(OpCode, @enumFromInt(frame.readByte()))) {
@@ -293,6 +294,11 @@ pub const VM = struct {
                     try self.callValue(self.peek(arg_count), arg_count);
                     frame = &self.frames[self.frame_count - 1];
                 },
+                .closure => {
+                    const function = frame.readConstant().obj.as(.function);
+                    const closure = try ObjClosure.create(gpa, &self.gc, function);
+                    self.push(.{ .obj = &closure.obj });
+                },
                 .@"return" => {
                     const result = self.pop();
                     self.frame_count -= 1;
@@ -336,10 +342,15 @@ pub const VM = struct {
 
     pub fn interpret(self: *VM, gpa: Allocator, source: []const u8) Error!void {
         var parser = Parser.init(source, &self.gc);
-        const script = try parser.run(gpa);
+        const function = try parser.run(gpa);
 
-        self.push(Value{ .obj = &script.obj });
-        try self.call(script, 0);
+        // To prevent GC from collecting "function", store it temporarily on the stack.
+        self.push(Value{ .obj = &function.obj });
+        const closure = try ObjClosure.create(gpa, &self.gc, function);
+        _ = self.pop();
+
+        self.push(Value{ .obj = &closure.obj });
+        try self.call(closure, 0);
 
         try self.run(gpa);
     }

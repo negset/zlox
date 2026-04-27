@@ -36,6 +36,15 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         => jumpInstruction(name, true, chunk, offset),
         .loop,
         => jumpInstruction(name, false, chunk, offset),
+        .closure => blk: {
+            // offset += 1;
+            const constant = chunk.code.items[offset + 1];
+            // offset += 1;
+            std.debug.print("{s:<16} {d:>4} ", .{ name, constant });
+            chunk.constants.items[constant].print();
+            std.debug.print("\n", .{});
+            break :blk offset + 2;
+        },
         else => simpleInstruction(name, offset),
     };
 }

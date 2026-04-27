@@ -6,12 +6,14 @@ const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
 
 pub const ObjType = enum {
+    closure,
     function,
     native,
     string,
 
     pub fn Impl(comptime obj_type: ObjType) type {
         return switch (obj_type) {
+            .closure => ObjClosure,
             .function => ObjFunction,
             .native => ObjNative,
             .string => ObjString,
@@ -45,9 +47,30 @@ pub const Obj = struct {
     }
 };
 
+pub const ObjClosure = struct {
+    obj: Obj,
+    function: *const ObjFunction,
+
+    pub fn create(gpa: Allocator, gc: *GC, function: *const ObjFunction) Allocator.Error!*@This() {
+        const new = try gc.createObject(gpa, .closure);
+        new.function = function;
+        return new;
+    }
+
+    pub fn destroy(self: *const @This(), gpa: Allocator) void {
+        gpa.destroy(self);
+        // Don't free "function" because closure does'nt own it.
+    }
+
+    pub fn print(self: *const @This()) void {
+        self.function.print();
+    }
+};
+
 pub const ObjFunction = struct {
     obj: Obj,
     arity: u8,
+    upvalue_count: u8,
     chunk: Chunk,
     // Null if it is top-level code.
     name: ?*const ObjString,
@@ -55,6 +78,7 @@ pub const ObjFunction = struct {
     pub fn create(gpa: Allocator, gc: *GC) Allocator.Error!*@This() {
         const new = try gc.createObject(gpa, .function);
         new.arity = 0;
+        new.upvalue_count = 0;
         new.name = null;
         new.chunk = Chunk.empty;
         return new;
@@ -64,7 +88,7 @@ pub const ObjFunction = struct {
         var chunk = self.chunk;
         chunk.deinit(gpa);
         gpa.destroy(self);
-        // Don't need to free "name" because GC manages it.
+        // Don't free "name" because GC manages it.
     }
 
     pub fn print(self: *const @This()) void {

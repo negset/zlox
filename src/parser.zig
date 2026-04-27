@@ -154,10 +154,8 @@ pub const Parser = struct {
     }
 
     fn emitJump(self: *Parser, gpa: Allocator, instruction: OpCode) Error!usize {
-        try self.emit(gpa, instruction);
-        // Emit temporary jump distance.
-        try self.emit(gpa, @as(u8, 0xff));
-        try self.emit(gpa, @as(u8, 0xff));
+        // Emit with temporary jump distance.
+        try self.emit(gpa, .{ instruction, @as(u8, 0xff), @as(u8, 0xff) });
         // Return offset of jump distance.
         return self.currentChunk().code.items.len - 2;
     }
@@ -252,8 +250,41 @@ pub const Parser = struct {
         return null;
     }
 
+    fn addUpvalue(self: *Parser, compiler: *Compiler, index: u8, is_local: bool) Error!u8 {
+        const upvalue_count = compiler.function.?.upvalue_count;
+
+        // Check if function already has upvalue that closes over that variable.
+        for (0..upvalue_count) |i| {
+            const upvalue = &compiler.upvalues[i];
+            if (upvalue.index == index and upvalue.is_local == is_local) {
+                return @intCast(i);
+            }
+        }
+
+        if (upvalue_count == Compiler.u8_count) {
+            return self.errorAtPrevious(
+                error.TooManyElements,
+                "Too many closure variables in function.",
+            );
+        }
+
+        compiler.upvalues[upvalue_count].is_local = is_local;
+        compiler.upvalues[upvalue_count].index = index;
+        compiler.function.?.upvalue_count += 1;
+        return upvalue_count;
+    }
+
+    fn resolveUpvalue(self: *Parser, compiler: *Compiler, name: Token) Error!?u8 {
+        if (compiler.enclosing) |enclosing| {
+            if (try self.resolveLocal(enclosing, name)) |local| {
+                return try self.addUpvalue(compiler, local, true);
+            }
+        }
+        return null;
+    }
+
     fn addLocal(self: *Parser, name: Token) Error!void {
-        if (self.compiler.local_count == Compiler.locals_max) {
+        if (self.compiler.local_count == Compiler.u8_count) {
             return self.errorAtPrevious(
                 error.TooManyElements,
                 "Too many local variables in function.",
@@ -415,6 +446,10 @@ pub const Parser = struct {
             get_op = .get_local;
             set_op = .set_local;
             arg = local;
+        } else if (try self.resolveUpvalue(self.compiler, name)) |upvalue| {
+            get_op = .get_upvalue;
+            set_op = .set_upvalue;
+            arg = upvalue;
         } else {
             get_op = .get_global;
             set_op = .set_global;
@@ -480,22 +515,15 @@ pub const Parser = struct {
             .left_paren => .{ .prefix = grouping, .infix = call, .precedence = .call },
             .minus => .{ .prefix = unary, .infix = binary, .precedence = .term },
             .plus => .{ .infix = binary, .precedence = .term },
-            .slash => .{ .infix = binary, .precedence = .factor },
-            .star => .{ .infix = binary, .precedence = .factor },
+            .slash, .star => .{ .infix = binary, .precedence = .factor },
             .bang => .{ .prefix = unary },
-            .bang_equal => .{ .infix = binary, .precedence = .equality },
-            .equal_equal => .{ .infix = binary, .precedence = .equality },
-            .greater => .{ .infix = binary, .precedence = .comparison },
-            .greater_equal => .{ .infix = binary, .precedence = .comparison },
-            .less => .{ .infix = binary, .precedence = .comparison },
-            .less_equal => .{ .infix = binary, .precedence = .comparison },
+            .bang_equal, .equal_equal => .{ .infix = binary, .precedence = .equality },
+            .greater, .greater_equal, .less, .less_equal => .{ .infix = binary, .precedence = .comparison },
             .identifier => .{ .prefix = variable },
             .string => .{ .prefix = string },
             .number => .{ .prefix = number },
             .@"and" => .{ .infix = @"and", .precedence = .@"and" },
-            .false => .{ .prefix = literal },
-            .true => .{ .prefix = literal },
-            .nil => .{ .prefix = literal },
+            .false, .true, .nil => .{ .prefix = literal },
             .@"or" => .{ .infix = @"or", .precedence = .@"or" },
             else => .{},
         };
@@ -545,7 +573,7 @@ pub const Parser = struct {
 
         const obj_function = try self.endCompiler(gpa);
         const constant = try self.makeConstant(gpa, .{ .obj = &obj_function.obj });
-        try self.emit(gpa, .{ OpCode.constant, constant });
+        try self.emit(gpa, .{ OpCode.closure, constant });
     }
 
     fn funDeclaration(self: *Parser, gpa: Allocator) Error!void {
@@ -618,8 +646,8 @@ pub const Parser = struct {
         try self.statement(gpa);
         try self.emitLoop(gpa, loop_start);
 
-        if (exit_jump) |_| {
-            try self.patchJump(exit_jump.?);
+        if (exit_jump) |exit| {
+            try self.patchJump(exit);
             // Discard the condition when it is falsey.
             try self.emit(gpa, OpCode.pop);
         }
