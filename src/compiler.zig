@@ -9,10 +9,12 @@ const Local = struct {
     name: Token,
     // Null if it is uninitialized.
     depth: ?u32,
+    is_captured: bool,
 };
 
 const Upvalue = struct {
     index: u8,
+    // Captures a local variable or an existing upvalue.
     is_local: bool,
 };
 
@@ -57,9 +59,10 @@ pub const Compiler = struct {
         }
 
         const local = &new.locals[new.local_count];
-        new.local_count += 1;
         local.depth = 0;
+        local.is_captured = false;
         local.name.lexeme = "";
+        new.local_count += 1;
 
         return new;
     }

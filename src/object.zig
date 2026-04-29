@@ -10,6 +10,7 @@ pub const ObjType = enum {
     function,
     native,
     string,
+    upvalue,
 
     pub fn Impl(comptime obj_type: ObjType) type {
         return switch (obj_type) {
@@ -17,6 +18,7 @@ pub const ObjType = enum {
             .function => ObjFunction,
             .native => ObjNative,
             .string => ObjString,
+            .upvalue => ObjUpvalue,
         };
     }
 };
@@ -50,14 +52,23 @@ pub const Obj = struct {
 pub const ObjClosure = struct {
     obj: Obj,
     function: *const ObjFunction,
+    upvalues: []?*ObjUpvalue,
 
     pub fn create(gpa: Allocator, gc: *GC, function: *const ObjFunction) Allocator.Error!*@This() {
+        const upvalues = try gpa.alloc(?*ObjUpvalue, function.upvalue_count);
+        // Ensure GC never sees uninitialized memory.
+        for (upvalues) |*upvalue| {
+            upvalue.* = null;
+        }
+
         const new = try gc.createObject(gpa, .closure);
         new.function = function;
+        new.upvalues = upvalues;
         return new;
     }
 
     pub fn destroy(self: *const @This(), gpa: Allocator) void {
+        gpa.free(self.upvalues);
         gpa.destroy(self);
         // Don't free "function" because closure does'nt own it.
     }
@@ -174,4 +185,28 @@ pub const ObjString = struct {
             return std.mem.eql(u8, a.string, b.string);
         }
     };
+};
+
+pub const ObjUpvalue = struct {
+    obj: Obj,
+    location: [*]Value,
+    closed: Value,
+    next: ?*@This(),
+
+    pub fn create(gpa: Allocator, gc: *GC, slot: [*]Value) Allocator.Error!*@This() {
+        const new = try gc.createObject(gpa, .upvalue);
+        new.closed = .{ .nil = {} };
+        new.location = slot;
+        new.next = null;
+        return new;
+    }
+
+    pub fn destroy(self: *const @This(), gpa: Allocator) void {
+        gpa.destroy(self);
+    }
+
+    pub fn print(_: *const @This()) void {
+        // Users can't print upvalues since they are not first-class values.
+        unreachable;
+    }
 };

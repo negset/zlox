@@ -3,11 +3,13 @@ const Allocator = std.mem.Allocator;
 const ObjType = @import("object.zig").ObjType;
 const Obj = @import("object.zig").Obj;
 const ObjString = @import("object.zig").ObjString;
+const ObjUpvalue = @import("object.zig").ObjUpvalue;
 const Value = @import("value.zig").Value;
 
 pub const GC = struct {
     globals: Table,
     strings: Table,
+    open_upvalues: ?*ObjUpvalue,
     objects: ?*Obj,
 
     const Table = std.HashMapUnmanaged(
@@ -20,6 +22,7 @@ pub const GC = struct {
     pub const init = GC{
         .globals = .empty,
         .strings = .empty,
+        .open_upvalues = null,
         .objects = null,
     };
 

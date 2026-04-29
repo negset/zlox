@@ -30,6 +30,7 @@ pub const OpCode = enum(u8) {
     loop,
     call,
     closure,
+    close_upvalue,
     @"return",
 };
 

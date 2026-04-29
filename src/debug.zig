@@ -29,6 +29,8 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         => constantInstruction(name, chunk, offset),
         .get_local,
         .set_local,
+        .get_upvalue,
+        .set_upvalue,
         .call,
         => byteInstruction(name, chunk, offset),
         .jump,
@@ -37,13 +39,23 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         .loop,
         => jumpInstruction(name, false, chunk, offset),
         .closure => blk: {
-            // offset += 1;
             const constant = chunk.code.items[offset + 1];
-            // offset += 1;
             std.debug.print("{s:<16} {d:>4} ", .{ name, constant });
             chunk.constants.items[constant].print();
             std.debug.print("\n", .{});
-            break :blk offset + 2;
+
+            const function = chunk.constants.items[constant].obj.as(.function);
+            for (0..function.upvalue_count) |_| {
+                const is_local = chunk.code.items[offset + 2];
+                const index = chunk.code.items[offset + 3];
+                std.debug.print("{d:0>4}      |                     {s} {d}\n", .{
+                    offset + 2,
+                    if (is_local != 0) "local" else "upvalue",
+                    index,
+                });
+            }
+
+            break :blk offset + 4;
         },
         else => simpleInstruction(name, offset),
     };

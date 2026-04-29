@@ -221,9 +221,12 @@ pub const Parser = struct {
         const c = self.compiler;
         c.scope_depth -= 1;
 
-        // Pop locals.
         while (c.local_count > 0 and c.locals[c.local_count - 1].depth.? > c.scope_depth) : (c.local_count -= 1) {
-            try self.emit(gpa, OpCode.pop);
+            if (c.locals[c.local_count - 1].is_captured) {
+                try self.emit(gpa, OpCode.close_upvalue);
+            } else {
+                try self.emit(gpa, OpCode.pop);
+            }
         }
     }
 
@@ -268,8 +271,10 @@ pub const Parser = struct {
             );
         }
 
-        compiler.upvalues[upvalue_count].is_local = is_local;
-        compiler.upvalues[upvalue_count].index = index;
+        compiler.upvalues[upvalue_count] = .{
+            .is_local = is_local,
+            .index = index,
+        };
         compiler.function.?.upvalue_count += 1;
         return upvalue_count;
     }
@@ -277,9 +282,15 @@ pub const Parser = struct {
     fn resolveUpvalue(self: *Parser, compiler: *Compiler, name: Token) Error!?u8 {
         if (compiler.enclosing) |enclosing| {
             if (try self.resolveLocal(enclosing, name)) |local| {
+                enclosing.locals[local].is_captured = true;
                 return try self.addUpvalue(compiler, local, true);
             }
+
+            if (try self.resolveUpvalue(enclosing, name)) |upvalue| {
+                return try self.addUpvalue(compiler, upvalue, false);
+            }
         }
+
         return null;
     }
 
@@ -293,8 +304,11 @@ pub const Parser = struct {
 
         defer self.compiler.local_count += 1;
         const local = &self.compiler.locals[self.compiler.local_count];
-        local.name = name;
-        local.depth = null;
+        local.* = .{
+            .name = name,
+            .depth = null,
+            .is_captured = false,
+        };
     }
 
     fn declareVariable(self: *Parser) Error!void {
@@ -574,6 +588,14 @@ pub const Parser = struct {
         const obj_function = try self.endCompiler(gpa);
         const constant = try self.makeConstant(gpa, .{ .obj = &obj_function.obj });
         try self.emit(gpa, .{ OpCode.closure, constant });
+
+        // OpCode.closure has a variably sized encoding.
+        for (0..obj_function.upvalue_count) |i| {
+            try self.emit(gpa, .{
+                @as(u8, @intFromBool(compiler.upvalues[i].is_local)),
+                compiler.upvalues[i].index,
+            });
+        }
     }
 
     fn funDeclaration(self: *Parser, gpa: Allocator) Error!void {

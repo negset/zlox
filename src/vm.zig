@@ -8,6 +8,7 @@ const ObjClosure = @import("object.zig").ObjClosure;
 const ObjFunction = @import("object.zig").ObjFunction;
 const ObjNative = @import("object.zig").ObjNative;
 const ObjString = @import("object.zig").ObjString;
+const ObjUpvalue = @import("object.zig").ObjUpvalue;
 const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 const config = @import("config");
@@ -74,6 +75,7 @@ pub const VM = struct {
     fn resetStack(self: *VM) void {
         self.stack.shrinkRetainingCapacity(0);
         self.frame_count = 0;
+        self.gc.open_upvalues = null;
     }
 
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
@@ -141,11 +143,13 @@ pub const VM = struct {
         }
 
         const frame = &self.frames[self.frame_count];
-        frame.closure = closure;
-        frame.ip = 0;
-        // The frame starts at stack_top - (arg_count + 1),
-        // pointing to the function followed by its arguments.
-        frame.slots = (self.stack.items.ptr + self.stack.items.len) - (arg_count + 1);
+        frame.* = .{
+            .closure = closure,
+            .ip = 0,
+            // The frame starts at stack_top - (arg_count + 1),
+            // pointing to the function followed by its arguments.
+            .slots = (self.stack.items.ptr + self.stack.items.len) - (arg_count + 1),
+        };
         self.frame_count += 1;
     }
 
@@ -176,6 +180,41 @@ pub const VM = struct {
         );
     }
 
+    fn captureUpvalue(self: *VM, gpa: Allocator, local: [*]Value) Allocator.Error!*ObjUpvalue {
+        var previous: ?*ObjUpvalue = null;
+        var current: ?*ObjUpvalue = self.gc.open_upvalues;
+
+        while (current) |cur| {
+            if (cur.location - local <= 0) break;
+            previous = cur;
+            current = cur.next;
+        }
+
+        if (current) |cur| {
+            if (cur.location == local) return cur;
+        }
+
+        const new = try ObjUpvalue.create(gpa, &self.gc, local);
+        new.next = current;
+
+        if (previous) |prev| {
+            prev.next = new;
+        } else {
+            self.gc.open_upvalues = new;
+        }
+
+        return new;
+    }
+
+    fn closeUpvalues(self: *VM, last: [*]Value) void {
+        while (self.gc.open_upvalues) |upvalue| {
+            if (upvalue.location - last < 0) break;
+            upvalue.closed = upvalue.location[0];
+            upvalue.location = @ptrCast(&upvalue.closed);
+            self.gc.open_upvalues = upvalue.next;
+        }
+    }
+
     fn concatenate(self: *VM, gpa: Allocator) Allocator.Error!void {
         const b = self.pop().obj.as(.string).string;
         const a = self.pop().obj.as(.string).string;
@@ -183,6 +222,28 @@ pub const VM = struct {
 
         const result = try ObjString.createByTake(gpa, &self.gc, string);
         self.push(Value{ .obj = &result.obj });
+    }
+
+    fn binaryOp(self: *VM, comptime instruction: OpCode) RuntimeError!void {
+        if (self.peek(0) != .number or self.peek(1) != .number) {
+            return self.runtimeError(
+                error.InvalidOperand,
+                "Operands must be numbers.",
+                .{},
+            );
+        }
+        const b = self.pop().number;
+        const a = self.pop().number;
+
+        self.push(switch (comptime instruction) {
+            .add => .{ .number = a + b },
+            .subtract => .{ .number = a - b },
+            .multiply => .{ .number = a * b },
+            .divide => .{ .number = a / b },
+            .greater => .{ .bool = a > b },
+            .less => .{ .bool = a < b },
+            else => unreachable,
+        });
     }
 
     fn run(self: *VM, gpa: Allocator) RuntimeError!void {
@@ -242,6 +303,14 @@ pub const VM = struct {
                         .{name.string},
                     );
                 },
+                .get_upvalue => {
+                    const slot = frame.readByte();
+                    self.push(frame.closure.upvalues[slot].?.location[0]);
+                },
+                .set_upvalue => {
+                    const slot = frame.readByte();
+                    frame.closure.upvalues[slot].?.location[0] = self.peek(0);
+                },
                 .equal => {
                     const b = self.pop();
                     const a = self.pop();
@@ -298,9 +367,22 @@ pub const VM = struct {
                     const function = frame.readConstant().obj.as(.function);
                     const closure = try ObjClosure.create(gpa, &self.gc, function);
                     self.push(.{ .obj = &closure.obj });
+                    for (0..closure.upvalues.len) |i| {
+                        const is_local = frame.readByte();
+                        const index = frame.readByte();
+                        closure.upvalues[i] = if (is_local != 0)
+                            try self.captureUpvalue(gpa, frame.slots + index)
+                        else
+                            frame.closure.upvalues[index];
+                    }
+                },
+                .close_upvalue => {
+                    self.closeUpvalues(self.stack.items.ptr + self.stack.items.len - 1);
+                    _ = self.pop();
                 },
                 .@"return" => {
                     const result = self.pop();
+                    self.closeUpvalues(frame.slots);
                     self.frame_count -= 1;
                     if (self.frame_count == 0) {
                         // Exit interpreter.
@@ -318,37 +400,14 @@ pub const VM = struct {
         }
     }
 
-    fn binaryOp(self: *VM, comptime instruction: OpCode) RuntimeError!void {
-        if (self.peek(0) != .number or self.peek(1) != .number) {
-            return self.runtimeError(
-                error.InvalidOperand,
-                "Operands must be numbers.",
-                .{},
-            );
-        }
-        const b = self.pop().number;
-        const a = self.pop().number;
-
-        self.push(switch (comptime instruction) {
-            .add => .{ .number = a + b },
-            .subtract => .{ .number = a - b },
-            .multiply => .{ .number = a * b },
-            .divide => .{ .number = a / b },
-            .greater => .{ .bool = a > b },
-            .less => .{ .bool = a < b },
-            else => unreachable,
-        });
-    }
-
     pub fn interpret(self: *VM, gpa: Allocator, source: []const u8) Error!void {
         var parser = Parser.init(source, &self.gc);
         const function = try parser.run(gpa);
 
         // To prevent GC from collecting "function", store it temporarily on the stack.
-        self.push(Value{ .obj = &function.obj });
+        self.push(.{ .obj = &function.obj });
         const closure = try ObjClosure.create(gpa, &self.gc, function);
         _ = self.pop();
-
         self.push(Value{ .obj = &closure.obj });
         try self.call(closure, 0);
 
