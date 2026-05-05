@@ -41,21 +41,26 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         .closure => blk: {
             const constant = chunk.code.items[offset + 1];
             std.debug.print("{s:<16} {d:>4} ", .{ name, constant });
-            chunk.constants.items[constant].print();
+            const value = chunk.constants.items[constant];
+            value.print();
             std.debug.print("\n", .{});
 
-            const function = chunk.constants.items[constant].obj.as(.function);
-            for (0..function.upvalue_count) |_| {
-                const is_local = chunk.code.items[offset + 2];
-                const index = chunk.code.items[offset + 3];
+            const function = value.obj.as(.function);
+
+            const upvalue_base = offset + 2;
+            for (0..function.upvalue_count) |i| {
+                const upvalue_offset = upvalue_base + i * 2;
+                const is_local = chunk.code.items[upvalue_offset];
+                const index = chunk.code.items[upvalue_offset + 1];
+
                 std.debug.print("{d:0>4}      |                     {s} {d}\n", .{
-                    offset + 2,
+                    upvalue_offset,
                     if (is_local != 0) "local" else "upvalue",
                     index,
                 });
             }
 
-            break :blk offset + 4;
+            break :blk upvalue_base + function.upvalue_count * 2;
         },
         else => simpleInstruction(name, offset),
     };
