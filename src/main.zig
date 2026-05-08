@@ -1,8 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const GC = @import("memory.zig").GC;
 const VM = @import("vm.zig").VM;
 
-fn repl(gpa: Allocator, io: std.Io, vm: *VM) void {
+fn repl(io: std.Io, vm: *VM) void {
     var stdin_buf: [1024]u8 = undefined;
     var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buf);
     const stdin = &stdin_reader.interface;
@@ -15,7 +16,7 @@ fn repl(gpa: Allocator, io: std.Io, vm: *VM) void {
         };
 
         // Ignore error.
-        vm.interpret(gpa, line) catch {};
+        vm.interpret(line) catch {};
     }
 }
 
@@ -39,25 +40,27 @@ fn runFile(gpa: Allocator, io: std.Io, vm: *VM, path: []const u8) void {
     };
     defer gpa.free(source);
 
-    vm.interpret(gpa, source) catch |err| switch (err) {
+    vm.interpret(source) catch |err| switch (err) {
         error.InvalidSyntax,
         error.TooManyElements,
         error.InvalidOperand,
         error.StackOverflow,
         => std.process.exit(65),
-        error.OutOfMemory => std.process.exit(71),
+        error.OutOfMemory,
+        => std.process.exit(71),
     };
 }
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
-    var vm = try VM.init(init.gpa, init.io);
-    defer vm.deinit(init.gpa);
+    var gc = GC.init(init.gpa);
+    var vm = try VM.init(&gc, init.io);
+    defer vm.deinit();
 
     switch (args.len) {
-        1 => repl(init.gpa, init.io, &vm),
-        2 => runFile(init.gpa, init.io, &vm, args[1]),
+        1 => repl(init.io, &vm),
+        2 => runFile(gc.allocator(), init.io, &vm, args[1]),
         else => {
             std.debug.print("Usage: zlox [path]\n", .{});
             std.process.exit(64);

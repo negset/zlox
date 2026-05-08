@@ -1,5 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Table = std.HashMapUnmanaged(
+    *const ObjString,
+    Value,
+    ObjString.Context,
+    75,
+);
 const OpCode = @import("chunk.zig").OpCode;
 const Compiler = @import("compiler.zig").Compiler;
 const Parser = @import("parser.zig").Parser;
@@ -42,7 +48,9 @@ pub const VM = struct {
     frames: [frames_max]CallFrame,
     frame_count: usize,
     stack: std.ArrayList(Value),
-    gc: GC,
+    globals: Table,
+    open_upvalues: ?*ObjUpvalue,
+    gc: *GC,
     io: std.Io,
 
     const RuntimeError = error{ InvalidOperand, StackOverflow } || Allocator.Error;
@@ -51,21 +59,24 @@ pub const VM = struct {
     const frames_max = 64;
     const stack_max = frames_max * Compiler.u8_count;
 
-    pub fn init(gpa: Allocator, io: std.Io) Allocator.Error!VM {
+    pub fn init(gc: *GC, io: std.Io) Allocator.Error!VM {
         var new = VM{
             .frames = undefined,
             .frame_count = 0,
-            .stack = try .initCapacity(gpa, stack_max),
-            .gc = .init,
+            .stack = try .initCapacity(gc.allocator(), stack_max),
+            .globals = .empty,
+            .open_upvalues = null,
+            .gc = gc,
             .io = io,
         };
-        try new.defineNative(gpa, "clock", clockNative);
+        try new.defineNative("clock", clockNative);
         return new;
     }
 
-    pub fn deinit(self: *VM, gpa: Allocator) void {
-        self.stack.deinit(gpa);
-        self.gc.deinit(gpa);
+    pub fn deinit(self: *VM) void {
+        self.stack.deinit(self.gc.allocator());
+        self.globals.deinit(self.gc.allocator());
+        self.gc.deinit();
     }
 
     fn clockNative(self: *VM, _: u8, _: [*]Value) Value {
@@ -75,7 +86,7 @@ pub const VM = struct {
     fn resetStack(self: *VM) void {
         self.stack.shrinkRetainingCapacity(0);
         self.frame_count = 0;
-        self.gc.open_upvalues = null;
+        self.open_upvalues = null;
     }
 
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
@@ -98,14 +109,14 @@ pub const VM = struct {
         return err;
     }
 
-    fn defineNative(self: *VM, gpa: Allocator, name: []const u8, native_fn: ObjNative.NativeFn) Allocator.Error!void {
-        const obj_string = try ObjString.createByCopy(gpa, &self.gc, name);
-        const obj_native = try ObjNative.create(gpa, &self.gc, native_fn);
+    fn defineNative(self: *VM, name: []const u8, native_fn: ObjNative.NativeFn) Allocator.Error!void {
+        const obj_string = try ObjString.createByCopy(self.gc, name);
+        const obj_native = try ObjNative.create(self.gc, native_fn);
         // To prevent GC from collecting name and function, store them temporarily on the stack.
         self.push(Value{ .obj = &obj_string.obj });
         self.push(Value{ .obj = &obj_native.obj });
-        try self.gc.globals.put(
-            gpa,
+        try self.globals.put(
+            self.gc.allocator(),
             self.stack.items[0].obj.as(.string),
             self.stack.items[1],
         );
@@ -180,9 +191,9 @@ pub const VM = struct {
         );
     }
 
-    fn captureUpvalue(self: *VM, gpa: Allocator, local: [*]Value) Allocator.Error!*ObjUpvalue {
+    fn captureUpvalue(self: *VM, local: [*]Value) Allocator.Error!*ObjUpvalue {
         var previous: ?*ObjUpvalue = null;
-        var current: ?*ObjUpvalue = self.gc.open_upvalues;
+        var current: ?*ObjUpvalue = self.open_upvalues;
 
         while (current) |cur| {
             if (cur.location - local <= 0) break;
@@ -194,33 +205,33 @@ pub const VM = struct {
             if (cur.location == local) return cur;
         }
 
-        const new = try ObjUpvalue.create(gpa, &self.gc, local);
+        const new = try ObjUpvalue.create(self.gc, local);
         new.next = current;
 
         if (previous) |prev| {
             prev.next = new;
         } else {
-            self.gc.open_upvalues = new;
+            self.open_upvalues = new;
         }
 
         return new;
     }
 
     fn closeUpvalues(self: *VM, last: [*]Value) void {
-        while (self.gc.open_upvalues) |upvalue| {
+        while (self.open_upvalues) |upvalue| {
             if (upvalue.location - last < 0) break;
             upvalue.closed = upvalue.location[0];
             upvalue.location = @ptrCast(&upvalue.closed);
-            self.gc.open_upvalues = upvalue.next;
+            self.open_upvalues = upvalue.next;
         }
     }
 
-    fn concatenate(self: *VM, gpa: Allocator) Allocator.Error!void {
+    fn concatenate(self: *VM) Allocator.Error!void {
         const b = self.pop().obj.as(.string).string;
         const a = self.pop().obj.as(.string).string;
-        const string = try std.mem.concat(gpa, u8, &.{ a, b });
+        const string = try std.mem.concat(self.gc.allocator(), u8, &.{ a, b });
 
-        const result = try ObjString.createByTake(gpa, &self.gc, string);
+        const result = try ObjString.createByTake(self.gc, string);
         self.push(Value{ .obj = &result.obj });
     }
 
@@ -246,7 +257,7 @@ pub const VM = struct {
         });
     }
 
-    fn run(self: *VM, gpa: Allocator) RuntimeError!void {
+    fn run(self: *VM) RuntimeError!void {
         var frame = &self.frames[self.frame_count - 1];
 
         while (true) {
@@ -277,7 +288,7 @@ pub const VM = struct {
                 },
                 .get_global => {
                     const name = frame.readString();
-                    if (self.gc.globals.get(name)) |value| {
+                    if (self.globals.get(name)) |value| {
                         self.push(value);
                     } else return self.runtimeError(
                         error.InvalidOperand,
@@ -289,12 +300,12 @@ pub const VM = struct {
                     const name = frame.readString();
                     // To prevent GC from collecting the value when calling "globals.put",
                     // use "peek" instead of "pop".
-                    try self.gc.globals.put(gpa, name, self.peek(0));
+                    try self.globals.put(self.gc.allocator(), name, self.peek(0));
                     _ = self.pop();
                 },
                 .set_global => {
                     const name = frame.readString();
-                    if (self.gc.globals.getPtr(name)) |ptr| {
+                    if (self.globals.getPtr(name)) |ptr| {
                         // If exists, overwrite it.
                         ptr.* = self.peek(0);
                     } else return self.runtimeError(
@@ -324,7 +335,7 @@ pub const VM = struct {
                 => |instruction| try self.binaryOp(instruction),
                 .add => {
                     if (self.peek(0).isObjType(.string) and self.peek(1).isObjType(.string)) {
-                        try self.concatenate(gpa);
+                        try self.concatenate();
                     } else if (self.peek(0) == .number and self.peek(1) == .number) {
                         try self.binaryOp(.add);
                     } else return self.runtimeError(
@@ -365,13 +376,13 @@ pub const VM = struct {
                 },
                 .closure => {
                     const function = frame.readConstant().obj.as(.function);
-                    const closure = try ObjClosure.create(gpa, &self.gc, function);
+                    const closure = try ObjClosure.create(self.gc, function);
                     self.push(.{ .obj = &closure.obj });
                     for (0..closure.upvalues.len) |i| {
                         const is_local = frame.readByte();
                         const index = frame.readByte();
                         closure.upvalues[i] = if (is_local != 0)
-                            try self.captureUpvalue(gpa, frame.slots + index)
+                            try self.captureUpvalue(frame.slots + index)
                         else
                             frame.closure.upvalues[index];
                     }
@@ -400,17 +411,17 @@ pub const VM = struct {
         }
     }
 
-    pub fn interpret(self: *VM, gpa: Allocator, source: []const u8) Error!void {
-        var parser = Parser.init(source, &self.gc);
-        const function = try parser.run(gpa);
+    pub fn interpret(self: *VM, source: []const u8) Error!void {
+        var parser = Parser.init(source, self.gc);
+        const function = try parser.run();
 
         // To prevent GC from collecting "function", store it temporarily on the stack.
         self.push(.{ .obj = &function.obj });
-        const closure = try ObjClosure.create(gpa, &self.gc, function);
+        const closure = try ObjClosure.create(self.gc, function);
         _ = self.pop();
         self.push(Value{ .obj = &closure.obj });
         try self.call(closure, 0);
 
-        try self.run(gpa);
+        try self.run();
     }
 };

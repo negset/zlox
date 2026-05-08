@@ -54,14 +54,14 @@ pub const ObjClosure = struct {
     function: *const ObjFunction,
     upvalues: []?*ObjUpvalue,
 
-    pub fn create(gpa: Allocator, gc: *GC, function: *const ObjFunction) Allocator.Error!*@This() {
-        const upvalues = try gpa.alloc(?*ObjUpvalue, function.upvalue_count);
+    pub fn create(gc: *GC, function: *const ObjFunction) Allocator.Error!*@This() {
+        const upvalues = try gc.allocator().alloc(?*ObjUpvalue, function.upvalue_count);
         // Ensure GC never sees uninitialized memory.
         for (upvalues) |*upvalue| {
             upvalue.* = null;
         }
 
-        const new = try gc.createObject(gpa, .closure);
+        const new = try gc.createObject(.closure);
         new.function = function;
         new.upvalues = upvalues;
         return new;
@@ -86,8 +86,8 @@ pub const ObjFunction = struct {
     // Null if it is top-level code.
     name: ?*const ObjString,
 
-    pub fn create(gpa: Allocator, gc: *GC) Allocator.Error!*@This() {
-        const new = try gc.createObject(gpa, .function);
+    pub fn create(gc: *GC) Allocator.Error!*@This() {
+        const new = try gc.createObject(.function);
         new.arity = 0;
         new.upvalue_count = 0;
         new.name = null;
@@ -117,8 +117,8 @@ pub const ObjNative = struct {
 
     pub const NativeFn = *const fn (vm: *VM, arg_count: u8, args: [*]Value) Value;
 
-    pub fn create(gpa: Allocator, gc: *GC, native_fn: NativeFn) Allocator.Error!*const @This() {
-        const new = try gc.createObject(gpa, .native);
+    pub fn create(gc: *GC, native_fn: NativeFn) Allocator.Error!*const @This() {
+        const new = try gc.createObject(.native);
         new.native_fn = native_fn;
         return new;
     }
@@ -137,32 +137,32 @@ pub const ObjString = struct {
     string: []const u8,
     hash: u64,
 
-    fn create(gpa: Allocator, gc: *GC, string: []const u8, hash: u64) Allocator.Error!*const @This() {
-        const new = try gc.createObject(gpa, .string);
+    fn create(gc: *GC, string: []const u8, hash: u64) Allocator.Error!*const @This() {
+        const new = try gc.createObject(.string);
         new.string = string;
         new.hash = hash;
-        try gc.strings.put(gpa, new, Value{ .nil = {} });
+        try gc.strings.put(gc.allocator(), new, Value{ .nil = {} });
         return new;
     }
 
-    pub fn createByCopy(gpa: Allocator, gc: *GC, string: []const u8) Allocator.Error!*const @This() {
+    pub fn createByCopy(gc: *GC, string: []const u8) Allocator.Error!*const @This() {
         const hash = std.hash.Fnv1a_64.hash(string);
         if (gc.findString(string, hash)) |interned| {
             return interned;
         }
 
-        const copied = try gpa.dupe(u8, string);
-        return create(gpa, gc, copied, hash);
+        const copied = try gc.allocator().dupe(u8, string);
+        return create(gc, copied, hash);
     }
 
-    pub fn createByTake(gpa: Allocator, gc: *GC, string: []const u8) Allocator.Error!*const @This() {
+    pub fn createByTake(gc: *GC, string: []const u8) Allocator.Error!*const @This() {
         const hash = std.hash.Fnv1a_64.hash(string);
         if (gc.findString(string, hash)) |interned| {
-            gpa.free(string);
+            gc.allocator().free(string);
             return interned;
         }
 
-        return create(gpa, gc, string, hash);
+        return create(gc, string, hash);
     }
 
     pub fn destroy(self: *const @This(), gpa: Allocator) void {
@@ -193,8 +193,8 @@ pub const ObjUpvalue = struct {
     closed: Value,
     next: ?*@This(),
 
-    pub fn create(gpa: Allocator, gc: *GC, slot: [*]Value) Allocator.Error!*@This() {
-        const new = try gc.createObject(gpa, .upvalue);
+    pub fn create(gc: *GC, slot: [*]Value) Allocator.Error!*@This() {
+        const new = try gc.createObject(.upvalue);
         new.closed = .{ .nil = {} };
         new.location = slot;
         new.next = null;

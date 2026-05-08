@@ -36,7 +36,6 @@ pub const Compiler = struct {
     pub const u8_count = std.math.maxInt(u8) + 1;
 
     pub fn init(
-        gpa: Allocator,
         gc: *GC,
         name: ?[]const u8,
         enclosing: ?*Compiler,
@@ -53,9 +52,9 @@ pub const Compiler = struct {
             .upvalues = undefined,
             .scope_depth = 0,
         };
-        new.function = try ObjFunction.create(gpa, gc);
+        new.function = try ObjFunction.create(gc);
         if (function_type != .script) {
-            new.function.?.name = try ObjString.createByCopy(gpa, gc, name.?);
+            new.function.?.name = try ObjString.createByCopy(gc, name.?);
         }
 
         const local = &new.locals[new.local_count];

@@ -36,7 +36,7 @@ const Precedence = enum {
     }
 };
 
-const ParseFn = *const fn (*Parser, Allocator, bool) Parser.Error!void;
+const ParseFn = *const fn (*Parser, bool) Parser.Error!void;
 
 const ParseRule = struct {
     prefix: ?ParseFn = null,
@@ -118,28 +118,28 @@ pub const Parser = struct {
         return true;
     }
 
-    fn emit(self: *Parser, gpa: Allocator, data: anytype) Error!void {
+    fn emit(self: *Parser, data: anytype) Error!void {
         const T = @TypeOf(data);
         switch (@typeInfo(T)) {
             .int => {
                 if (T != u8) @compileError("Incompatible int type to emit: " ++ @typeName(T));
-                try self.currentChunk().write(gpa, @intCast(data), self.previous.line);
+                try self.currentChunk().write(self.gc.allocator(), @intCast(data), self.previous.line);
             },
             .@"enum" => {
                 if (T != OpCode) @compileError("Incompatible enum type to emit: " ++ @typeName(T));
-                try self.currentChunk().write(gpa, @intFromEnum(data), self.previous.line);
+                try self.currentChunk().write(self.gc.allocator(), @intFromEnum(data), self.previous.line);
             },
             .@"struct" => |s| {
                 inline for (s.fields) |field| {
-                    try self.emit(gpa, @field(data, field.name));
+                    try self.emit(@field(data, field.name));
                 }
             },
             else => @compileError("Incompatible type to emit: " ++ @typeName(T)),
         }
     }
 
-    fn emitLoop(self: *Parser, gpa: Allocator, loop_start: usize) Error!void {
-        try self.emit(gpa, OpCode.loop);
+    fn emitLoop(self: *Parser, loop_start: usize) Error!void {
+        try self.emit(OpCode.loop);
 
         // +2 to take into account the loop distance itself.
         const distance = self.currentChunk().code.items.len - loop_start + 2;
@@ -150,22 +150,22 @@ pub const Parser = struct {
             );
         }
 
-        try self.emit(gpa, .{ @as(u8, @truncate(distance >> 8)), @as(u8, @truncate(distance)) });
+        try self.emit(.{ @as(u8, @truncate(distance >> 8)), @as(u8, @truncate(distance)) });
     }
 
-    fn emitJump(self: *Parser, gpa: Allocator, instruction: OpCode) Error!usize {
+    fn emitJump(self: *Parser, instruction: OpCode) Error!usize {
         // Emit with temporary jump distance.
-        try self.emit(gpa, .{ instruction, @as(u8, 0xff), @as(u8, 0xff) });
+        try self.emit(.{ instruction, @as(u8, 0xff), @as(u8, 0xff) });
         // Return offset of jump distance.
         return self.currentChunk().code.items.len - 2;
     }
 
-    fn emitReturn(self: *Parser, gpa: Allocator) Error!void {
-        try self.emit(gpa, .{ OpCode.nil, OpCode.@"return" });
+    fn emitReturn(self: *Parser) Error!void {
+        try self.emit(.{ OpCode.nil, OpCode.@"return" });
     }
 
-    fn makeConstant(self: *Parser, gpa: Allocator, value: Value) Error!u8 {
-        const index = try self.currentChunk().addConstant(gpa, value);
+    fn makeConstant(self: *Parser, value: Value) Error!u8 {
+        const index = try self.currentChunk().addConstant(self.gc.allocator(), value);
         // Make sure the chunk does not contain too many constants,
         // since OpCode.constant uses a single byte for its index operand.
         const byte = std.math.cast(u8, index) orelse {
@@ -177,9 +177,9 @@ pub const Parser = struct {
         return byte;
     }
 
-    fn emitConstant(self: *Parser, gpa: Allocator, value: Value) Error!void {
-        const constant = try self.makeConstant(gpa, value);
-        try self.emit(gpa, .{ OpCode.constant, constant });
+    fn emitConstant(self: *Parser, value: Value) Error!void {
+        const constant = try self.makeConstant(value);
+        try self.emit(.{ OpCode.constant, constant });
     }
 
     fn patchJump(self: *Parser, target: usize) Error!void {
@@ -198,8 +198,8 @@ pub const Parser = struct {
         std.mem.writeInt(u16, buf, @intCast(distance), .big);
     }
 
-    pub fn endCompiler(self: *Parser, gpa: Allocator) Error!*const ObjFunction {
-        try self.emitReturn(gpa);
+    pub fn endCompiler(self: *Parser) Error!*const ObjFunction {
+        try self.emitReturn();
         const obj_function = self.compiler.function.?;
 
         if (comptime config.print_code) {
@@ -217,22 +217,22 @@ pub const Parser = struct {
         self.compiler.scope_depth += 1;
     }
 
-    pub fn endScope(self: *Parser, gpa: Allocator) Error!void {
+    pub fn endScope(self: *Parser) Error!void {
         const c = self.compiler;
         c.scope_depth -= 1;
 
         while (c.local_count > 0 and c.locals[c.local_count - 1].depth.? > c.scope_depth) : (c.local_count -= 1) {
             if (c.locals[c.local_count - 1].is_captured) {
-                try self.emit(gpa, OpCode.close_upvalue);
+                try self.emit(OpCode.close_upvalue);
             } else {
-                try self.emit(gpa, OpCode.pop);
+                try self.emit(OpCode.pop);
             }
         }
     }
 
-    fn identifierConstant(self: *Parser, gpa: Allocator, name: Token) Error!u8 {
-        const obj_string = try ObjString.createByCopy(gpa, self.gc, name.lexeme);
-        return self.makeConstant(gpa, .{ .obj = &obj_string.obj });
+    fn identifierConstant(self: *Parser, name: Token) Error!u8 {
+        const obj_string = try ObjString.createByCopy(self.gc, name.lexeme);
+        return self.makeConstant(.{ .obj = &obj_string.obj });
     }
 
     fn resolveLocal(self: *Parser, compiler: *Compiler, name: Token) Error!?u8 {
@@ -333,14 +333,14 @@ pub const Parser = struct {
         try self.addLocal(name);
     }
 
-    fn parseVariable(self: *Parser, gpa: Allocator, message: []const u8) Error!u8 {
+    fn parseVariable(self: *Parser, message: []const u8) Error!u8 {
         try self.consume(.identifier, message);
 
         try self.declareVariable();
         // If in a local scope, return dummy index.
         if (self.compiler.scope_depth > 0) return 0;
 
-        return self.identifierConstant(gpa, self.previous);
+        return self.identifierConstant(self.previous);
     }
 
     fn markInitialized(self: *Parser) void {
@@ -350,21 +350,21 @@ pub const Parser = struct {
         c.locals[c.local_count - 1].depth = c.scope_depth;
     }
 
-    fn defineVariable(self: *Parser, gpa: Allocator, global: u8) Error!void {
+    fn defineVariable(self: *Parser, global: u8) Error!void {
         // If in a local scope, use stack value as a local variable.
         if (self.compiler.scope_depth > 0) {
             self.markInitialized();
             return;
         }
 
-        try self.emit(gpa, .{ OpCode.define_global, global });
+        try self.emit(.{ OpCode.define_global, global });
     }
 
-    fn argumentList(self: *Parser, gpa: Allocator) Error!u8 {
+    fn argumentList(self: *Parser) Error!u8 {
         var arg_count: u8 = 0;
         if (!self.check(.right_paren)) {
             while (true) {
-                try self.expression(gpa);
+                try self.expression();
                 if (arg_count == 255) {
                     return self.errorAtPrevious(
                         error.TooManyElements,
@@ -379,80 +379,80 @@ pub const Parser = struct {
         return arg_count;
     }
 
-    fn @"and"(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        const end_jump = try self.emitJump(gpa, .jump_if_false);
+    fn @"and"(self: *Parser, _: bool) Error!void {
+        const end_jump = try self.emitJump(.jump_if_false);
 
         // Discard the left operand when it is truthy.
-        try self.emit(gpa, OpCode.pop);
-        try self.parsePrecedence(gpa, .@"and");
+        try self.emit(OpCode.pop);
+        try self.parsePrecedence(.@"and");
 
         try self.patchJump(end_jump);
     }
 
-    fn binary(self: *Parser, gpa: Allocator, _: bool) Error!void {
+    fn binary(self: *Parser, _: bool) Error!void {
         const operator_type = self.previous.token_type;
         const rule = getRule(operator_type);
-        try self.parsePrecedence(gpa, rule.precedence.next());
+        try self.parsePrecedence(rule.precedence.next());
         switch (operator_type) {
-            .minus => try self.emit(gpa, OpCode.subtract),
-            .plus => try self.emit(gpa, OpCode.add),
-            .slash => try self.emit(gpa, OpCode.divide),
-            .star => try self.emit(gpa, OpCode.multiply),
-            .bang_equal => try self.emit(gpa, .{ OpCode.equal, OpCode.not }),
-            .equal_equal => try self.emit(gpa, OpCode.equal),
-            .greater => try self.emit(gpa, OpCode.greater),
-            .greater_equal => try self.emit(gpa, .{ OpCode.less, OpCode.not }),
-            .less => try self.emit(gpa, OpCode.less),
-            .less_equal => try self.emit(gpa, .{ OpCode.greater, OpCode.not }),
+            .minus => try self.emit(OpCode.subtract),
+            .plus => try self.emit(OpCode.add),
+            .slash => try self.emit(OpCode.divide),
+            .star => try self.emit(OpCode.multiply),
+            .bang_equal => try self.emit(.{ OpCode.equal, OpCode.not }),
+            .equal_equal => try self.emit(OpCode.equal),
+            .greater => try self.emit(OpCode.greater),
+            .greater_equal => try self.emit(.{ OpCode.less, OpCode.not }),
+            .less => try self.emit(OpCode.less),
+            .less_equal => try self.emit(.{ OpCode.greater, OpCode.not }),
             else => unreachable,
         }
     }
 
-    fn call(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        const arg_count = try self.argumentList(gpa);
-        try self.emit(gpa, .{ OpCode.call, arg_count });
+    fn call(self: *Parser, _: bool) Error!void {
+        const arg_count = try self.argumentList();
+        try self.emit(.{ OpCode.call, arg_count });
     }
 
-    fn literal(self: *Parser, gpa: Allocator, _: bool) Error!void {
+    fn literal(self: *Parser, _: bool) Error!void {
         switch (self.previous.token_type) {
-            .false => try self.emit(gpa, OpCode.false),
-            .nil => try self.emit(gpa, OpCode.nil),
-            .true => try self.emit(gpa, OpCode.true),
+            .false => try self.emit(OpCode.false),
+            .nil => try self.emit(OpCode.nil),
+            .true => try self.emit(OpCode.true),
             else => unreachable,
         }
     }
 
-    fn grouping(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        try self.expression(gpa);
+    fn grouping(self: *Parser, _: bool) Error!void {
+        try self.expression();
         try self.consume(.right_paren, "Expect ')' after expression.");
     }
 
-    fn number(self: *Parser, gpa: Allocator, _: bool) Error!void {
+    fn number(self: *Parser, _: bool) Error!void {
         const value = std.fmt.parseFloat(f64, self.previous.lexeme) catch
             @panic("Invalid number.");
-        try self.emitConstant(gpa, .{ .number = value });
+        try self.emitConstant(.{ .number = value });
     }
 
-    fn @"or"(self: *Parser, gpa: Allocator, _: bool) Error!void {
-        const else_jump = try self.emitJump(gpa, .jump_if_false);
-        const end_jump = try self.emitJump(gpa, .jump);
+    fn @"or"(self: *Parser, _: bool) Error!void {
+        const else_jump = try self.emitJump(.jump_if_false);
+        const end_jump = try self.emitJump(.jump);
 
         try self.patchJump(else_jump);
         // Discard the left operand when it is falsey.
-        try self.emit(gpa, OpCode.pop);
+        try self.emit(OpCode.pop);
 
-        try self.parsePrecedence(gpa, .@"or");
+        try self.parsePrecedence(.@"or");
         try self.patchJump(end_jump);
     }
 
-    fn string(self: *Parser, gpa: Allocator, _: bool) Error!void {
+    fn string(self: *Parser, _: bool) Error!void {
         // Trim double quotes.
         const str = self.previous.lexeme[1 .. self.previous.lexeme.len - 1];
-        const obj_string = try ObjString.createByCopy(gpa, self.gc, str);
-        try self.emitConstant(gpa, .{ .obj = &obj_string.obj });
+        const obj_string = try ObjString.createByCopy(self.gc, str);
+        try self.emitConstant(.{ .obj = &obj_string.obj });
     }
 
-    fn namedVariable(self: *Parser, gpa: Allocator, name: Token, can_assign: bool) Error!void {
+    fn namedVariable(self: *Parser, name: Token, can_assign: bool) Error!void {
         var get_op: OpCode = undefined;
         var set_op: OpCode = undefined;
         var arg: u8 = undefined;
@@ -467,42 +467,42 @@ pub const Parser = struct {
         } else {
             get_op = .get_global;
             set_op = .set_global;
-            arg = try self.identifierConstant(gpa, name);
+            arg = try self.identifierConstant(name);
         }
 
         if (can_assign and try self.match(.equal)) {
-            try self.expression(gpa);
-            try self.emit(gpa, .{ set_op, arg });
+            try self.expression();
+            try self.emit(.{ set_op, arg });
         } else {
-            try self.emit(gpa, .{ get_op, arg });
+            try self.emit(.{ get_op, arg });
         }
     }
 
-    fn variable(self: *Parser, gpa: Allocator, can_assign: bool) Error!void {
-        try self.namedVariable(gpa, self.previous, can_assign);
+    fn variable(self: *Parser, can_assign: bool) Error!void {
+        try self.namedVariable(self.previous, can_assign);
     }
 
-    fn unary(self: *Parser, gpa: Allocator, _: bool) Error!void {
+    fn unary(self: *Parser, _: bool) Error!void {
         const operator_type = self.previous.token_type;
 
         // Compile the operand.
-        try self.parsePrecedence(gpa, .unary);
+        try self.parsePrecedence(.unary);
 
         // Emit the operator instruction.
         switch (operator_type) {
-            .minus => try self.emit(gpa, OpCode.negate),
-            .bang => try self.emit(gpa, OpCode.not),
+            .minus => try self.emit(OpCode.negate),
+            .bang => try self.emit(OpCode.not),
             else => unreachable,
         }
     }
 
-    fn parsePrecedence(self: *Parser, gpa: Allocator, precedence: Precedence) Error!void {
+    fn parsePrecedence(self: *Parser, precedence: Precedence) Error!void {
         try self.advance();
 
         const can_assign = precedence.le(.assignment);
 
         if (getRule(self.previous.token_type).prefix) |prefix_rule| {
-            try prefix_rule(self, gpa, can_assign);
+            try prefix_rule(self, can_assign);
         } else {
             return self.errorAtPrevious(
                 error.InvalidSyntax,
@@ -513,7 +513,7 @@ pub const Parser = struct {
         while (precedence.le(getRule(self.current.token_type).precedence)) {
             try self.advance();
             const infix_rule = getRule(self.previous.token_type).infix;
-            try infix_rule.?(self, gpa, can_assign);
+            try infix_rule.?(self, can_assign);
         }
 
         if (can_assign and try self.match(.equal)) {
@@ -543,21 +543,20 @@ pub const Parser = struct {
         };
     }
 
-    fn expression(self: *Parser, gpa: Allocator) Error!void {
-        try self.parsePrecedence(gpa, .assignment);
+    fn expression(self: *Parser) Error!void {
+        try self.parsePrecedence(.assignment);
     }
 
-    fn block(self: *Parser, gpa: Allocator) Error!void {
+    fn block(self: *Parser) Error!void {
         while (!self.check(.right_brace) and !self.check(.eof)) {
-            try self.declaration(gpa);
+            try self.declaration();
         }
 
         try self.consume(.right_brace, "Expect '}' after block.");
     }
 
-    fn function(self: *Parser, gpa: Allocator, function_type: FunctionType) Error!void {
+    fn function(self: *Parser, function_type: FunctionType) Error!void {
         var compiler = try Compiler.init(
-            gpa,
             self.gc,
             self.previous.lexeme,
             self.compiler,
@@ -576,134 +575,134 @@ pub const Parser = struct {
                     );
                 }
                 self.compiler.function.?.arity += 1;
-                const constant = try self.parseVariable(gpa, "Expect parameter name.");
-                try self.defineVariable(gpa, constant);
+                const constant = try self.parseVariable("Expect parameter name.");
+                try self.defineVariable(constant);
                 if (!try self.match(.comma)) break;
             }
         }
         try self.consume(.right_paren, "Expect ')' after parameters.");
         try self.consume(.left_brace, "Expect '{' before function body.");
-        try self.block(gpa);
+        try self.block();
 
-        const obj_function = try self.endCompiler(gpa);
-        const constant = try self.makeConstant(gpa, .{ .obj = &obj_function.obj });
-        try self.emit(gpa, .{ OpCode.closure, constant });
+        const obj_function = try self.endCompiler();
+        const constant = try self.makeConstant(.{ .obj = &obj_function.obj });
+        try self.emit(.{ OpCode.closure, constant });
 
         // OpCode.closure has a variably sized encoding.
         for (0..obj_function.upvalue_count) |i| {
-            try self.emit(gpa, .{
+            try self.emit(.{
                 @as(u8, @intFromBool(compiler.upvalues[i].is_local)),
                 compiler.upvalues[i].index,
             });
         }
     }
 
-    fn funDeclaration(self: *Parser, gpa: Allocator) Error!void {
-        const global = try self.parseVariable(gpa, "Expect function name.");
+    fn funDeclaration(self: *Parser) Error!void {
+        const global = try self.parseVariable("Expect function name.");
         // To support recursive local functions, mark it "initalized" as soon as compile the name.
         self.markInitialized();
-        try self.function(gpa, .function);
-        try self.defineVariable(gpa, global);
+        try self.function(.function);
+        try self.defineVariable(global);
     }
 
-    fn varDeclaration(self: *Parser, gpa: Allocator) Error!void {
-        const global = try self.parseVariable(gpa, "Expect variable name.");
+    fn varDeclaration(self: *Parser) Error!void {
+        const global = try self.parseVariable("Expect variable name.");
 
         if (try self.match(.equal)) {
-            try self.expression(gpa);
+            try self.expression();
         } else {
             // Implicit initialization
-            try self.emit(gpa, OpCode.nil);
+            try self.emit(OpCode.nil);
         }
         try self.consume(.semicolon, "Expect ';' after variable declaration.");
 
-        try self.defineVariable(gpa, global);
+        try self.defineVariable(global);
     }
 
-    fn expressionStatement(self: *Parser, gpa: Allocator) Error!void {
-        try self.expression(gpa);
+    fn expressionStatement(self: *Parser) Error!void {
+        try self.expression();
         try self.consume(.semicolon, "Expect ';' after expression.");
-        try self.emit(gpa, OpCode.pop);
+        try self.emit(OpCode.pop);
     }
 
-    fn forStatement(self: *Parser, gpa: Allocator) Error!void {
+    fn forStatement(self: *Parser) Error!void {
         self.beginScope();
         try self.consume(.left_paren, "Expect '(' after 'for'.");
         // Initializer clause is optional.
         if (try self.match(.semicolon)) {
             // No initializer.
         } else if (try self.match(.@"var")) {
-            try self.varDeclaration(gpa);
+            try self.varDeclaration();
         } else {
-            try self.expressionStatement(gpa);
+            try self.expressionStatement();
         }
 
         var loop_start = self.currentChunk().code.items.len;
         var exit_jump: ?usize = null;
         // Condition clause is optional.
         if (!try self.match(.semicolon)) {
-            try self.expression(gpa);
+            try self.expression();
             try self.consume(.semicolon, "Expecet ';' after loop condition.");
 
             // Jump out of the loop if the condition is false.
-            exit_jump = try self.emitJump(gpa, .jump_if_false);
+            exit_jump = try self.emitJump(.jump_if_false);
             // Discard the condition when it is truthy.
-            try self.emit(gpa, OpCode.pop);
+            try self.emit(OpCode.pop);
         }
 
         // Increment clause is optional.
         if (!try self.match(.right_paren)) {
-            const body_jump = try self.emitJump(gpa, .jump);
+            const body_jump = try self.emitJump(.jump);
             const increment_start = self.currentChunk().code.items.len;
-            try self.expression(gpa);
+            try self.expression();
             // Discard the increment result.
-            try self.emit(gpa, OpCode.pop);
+            try self.emit(OpCode.pop);
             try self.consume(.right_paren, "Expect ')' after for clauses.");
 
-            try self.emitLoop(gpa, loop_start);
+            try self.emitLoop(loop_start);
             loop_start = increment_start;
             try self.patchJump(body_jump);
         }
 
-        try self.statement(gpa);
-        try self.emitLoop(gpa, loop_start);
+        try self.statement();
+        try self.emitLoop(loop_start);
 
         if (exit_jump) |exit| {
             try self.patchJump(exit);
             // Discard the condition when it is falsey.
-            try self.emit(gpa, OpCode.pop);
+            try self.emit(OpCode.pop);
         }
 
-        try self.endScope(gpa);
+        try self.endScope();
     }
 
-    fn ifStatement(self: *Parser, gpa: Allocator) Error!void {
+    fn ifStatement(self: *Parser) Error!void {
         try self.consume(.left_paren, "Expect '(' after 'if'.");
-        try self.expression(gpa);
+        try self.expression();
         try self.consume(.right_paren, "Expect ')' after condition.");
 
-        const then_jump = try self.emitJump(gpa, .jump_if_false);
+        const then_jump = try self.emitJump(.jump_if_false);
         // Discard the condition when it is truthy.
-        try self.emit(gpa, OpCode.pop);
-        try self.statement(gpa);
+        try self.emit(OpCode.pop);
+        try self.statement();
 
-        const else_jump = try self.emitJump(gpa, .jump);
+        const else_jump = try self.emitJump(.jump);
 
         try self.patchJump(then_jump);
         // Discard the condition when it is falsey.
-        try self.emit(gpa, OpCode.pop);
+        try self.emit(OpCode.pop);
 
-        if (try self.match(.@"else")) try self.statement(gpa);
+        if (try self.match(.@"else")) try self.statement();
         try self.patchJump(else_jump);
     }
 
-    fn printStatement(self: *Parser, gpa: Allocator) Error!void {
-        try self.expression(gpa);
+    fn printStatement(self: *Parser) Error!void {
+        try self.expression();
         try self.consume(.semicolon, "Expect ';' after value.");
-        try self.emit(gpa, OpCode.print);
+        try self.emit(OpCode.print);
     }
 
-    fn returnStatement(self: *Parser, gpa: Allocator) Error!void {
+    fn returnStatement(self: *Parser) Error!void {
         if (self.compiler.function_type == .script) {
             return self.errorAtPrevious(
                 error.InvalidSyntax,
@@ -712,58 +711,58 @@ pub const Parser = struct {
         }
 
         if (try self.match(.semicolon)) {
-            try self.emitReturn(gpa);
+            try self.emitReturn();
         } else {
-            try self.expression(gpa);
+            try self.expression();
             try self.consume(.semicolon, "Expect ';' after return value.");
-            try self.emit(gpa, OpCode.@"return");
+            try self.emit(OpCode.@"return");
         }
     }
 
-    fn whileStatement(self: *Parser, gpa: Allocator) Error!void {
+    fn whileStatement(self: *Parser) Error!void {
         const loop_start = self.currentChunk().code.items.len;
         try self.consume(.left_paren, "Expect '(' after 'while'.");
-        try self.expression(gpa);
+        try self.expression();
         try self.consume(.right_paren, "Expect ')' after condition.");
 
-        const exit_jump = try self.emitJump(gpa, .jump_if_false);
+        const exit_jump = try self.emitJump(.jump_if_false);
         // Discard the condition when it is truthy.
-        try self.emit(gpa, OpCode.pop);
-        try self.statement(gpa);
-        try self.emitLoop(gpa, loop_start);
+        try self.emit(OpCode.pop);
+        try self.statement();
+        try self.emitLoop(loop_start);
 
         try self.patchJump(exit_jump);
         // Discard the condition when it is falsey.
-        try self.emit(gpa, OpCode.pop);
+        try self.emit(OpCode.pop);
     }
 
-    pub fn declaration(self: *Parser, gpa: Allocator) Error!void {
+    pub fn declaration(self: *Parser) Error!void {
         if (try self.match(.fun)) {
-            try self.funDeclaration(gpa);
+            try self.funDeclaration();
         } else if (try self.match(.@"var")) {
-            try self.varDeclaration(gpa);
+            try self.varDeclaration();
         } else {
-            try self.statement(gpa);
+            try self.statement();
         }
     }
 
-    fn statement(self: *Parser, gpa: Allocator) Error!void {
+    fn statement(self: *Parser) Error!void {
         if (try self.match(.print)) {
-            try self.printStatement(gpa);
+            try self.printStatement();
         } else if (try self.match(.@"for")) {
-            try self.forStatement(gpa);
+            try self.forStatement();
         } else if (try self.match(.@"if")) {
-            try self.ifStatement(gpa);
+            try self.ifStatement();
         } else if (try self.match(.@"return")) {
-            try self.returnStatement(gpa);
+            try self.returnStatement();
         } else if (try self.match(.@"while")) {
-            try self.whileStatement(gpa);
+            try self.whileStatement();
         } else if (try self.match(.left_brace)) {
             self.beginScope();
-            try self.block(gpa);
-            try self.endScope(gpa);
+            try self.block();
+            try self.endScope();
         } else {
-            try self.expressionStatement(gpa);
+            try self.expressionStatement();
         }
     }
 
@@ -787,9 +786,8 @@ pub const Parser = struct {
         }
     }
 
-    pub fn run(self: *Parser, gpa: Allocator) Error!*const ObjFunction {
+    pub fn run(self: *Parser) Error!*const ObjFunction {
         var compiler = try Compiler.init(
-            gpa,
             self.gc,
             null,
             null,
@@ -800,11 +798,11 @@ pub const Parser = struct {
         var first_error: ?Error = null;
         try self.advance();
         while (!try self.match(.eof)) {
-            self.declaration(gpa) catch |err| {
+            self.declaration() catch |err| {
                 try self.synchronize();
                 if (first_error == null) first_error = err;
             };
         }
-        return if (first_error) |err| err else try self.endCompiler(gpa);
+        return if (first_error) |err| err else try self.endCompiler();
     }
 };
