@@ -68,7 +68,7 @@ pub const ObjClosure = struct {
         return new;
     }
 
-    pub fn destroy(self: *const @This(), gpa: Allocator) void {
+    pub fn destroy(self: *@This(), gpa: Allocator) void {
         gpa.free(self.upvalues);
         gpa.destroy(self);
         // Don't free "function" because closure does'nt own it.
@@ -96,7 +96,7 @@ pub const ObjFunction = struct {
         return new;
     }
 
-    pub fn destroy(self: *const @This(), gpa: Allocator) void {
+    pub fn destroy(self: *@This(), gpa: Allocator) void {
         var chunk = self.chunk;
         chunk.deinit(gpa);
         gpa.destroy(self);
@@ -124,7 +124,7 @@ pub const ObjNative = struct {
         return new;
     }
 
-    pub fn destroy(self: *const @This(), gpa: Allocator) void {
+    pub fn destroy(self: *@This(), gpa: Allocator) void {
         gpa.destroy(self);
     }
 
@@ -166,7 +166,7 @@ pub const ObjString = struct {
         return create(gc, string, hash);
     }
 
-    pub fn destroy(self: *const @This(), gpa: Allocator) void {
+    pub fn destroy(self: *@This(), gpa: Allocator) void {
         gpa.free(self.string);
         gpa.destroy(self);
     }
@@ -202,7 +202,7 @@ pub const ObjUpvalue = struct {
         return new;
     }
 
-    pub fn destroy(self: *const @This(), gpa: Allocator) void {
+    pub fn destroy(self: *@This(), gpa: Allocator) void {
         gpa.destroy(self);
     }
 

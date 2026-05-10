@@ -31,7 +31,7 @@ pub const Compiler = struct {
     locals: [u8_count]Local,
     local_count: u8,
     upvalues: [u8_count]Upvalue,
-    scope_depth: u32,
+    scope_depth: u8,
 
     pub const u8_count = std.math.maxInt(u8) + 1;
 

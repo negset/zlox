@@ -19,8 +19,8 @@ const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 const config = @import("config");
 
-const CallFrame = struct {
-    closure: *const ObjClosure,
+pub const CallFrame = struct {
+    closure: *ObjClosure,
     ip: usize,
     slots: [*]Value,
 
@@ -47,8 +47,7 @@ const CallFrame = struct {
 pub const VM = struct {
     gc: GC,
     io: std.Io,
-    frames: [frames_max]CallFrame,
-    frame_count: usize,
+    frames: std.ArrayList(CallFrame),
     stack: std.ArrayList(Value),
     globals: Table,
     open_upvalues: ?*ObjUpvalue,
@@ -61,11 +60,13 @@ pub const VM = struct {
 
     pub fn init(self: *VM, gpa: Allocator, io: std.Io) Allocator.Error!void {
         self.gc = GC.init(gpa, .{
+            .frames = &self.frames,
             .stack = &self.stack,
             .globals = &self.globals,
+            .open_upvalues = self.open_upvalues,
         });
         self.io = io;
-        self.frame_count = 0;
+        self.frames = try .initCapacity(gpa, frames_max);
         self.stack = try .initCapacity(gpa, stack_max);
         self.globals = .empty;
         self.open_upvalues = null;
@@ -74,7 +75,8 @@ pub const VM = struct {
     }
 
     pub fn deinit(self: *VM) void {
-        self.stack.deinit(self.gc.allocator());
+        self.frames.deinit(self.gc.backing);
+        self.stack.deinit(self.gc.backing);
         self.globals.deinit(self.gc.allocator());
         self.gc.deinit();
     }
@@ -85,7 +87,7 @@ pub const VM = struct {
 
     fn resetStack(self: *VM) void {
         self.stack.shrinkRetainingCapacity(0);
-        self.frame_count = 0;
+        self.frames.shrinkRetainingCapacity(0);
         self.open_upvalues = null;
     }
 
@@ -93,8 +95,8 @@ pub const VM = struct {
         std.debug.print("{s} (runtime): ", .{@errorName(err)});
         std.debug.print(fmt ++ "\n", args);
 
-        for (0..self.frame_count) |i| {
-            const frame = &self.frames[self.frame_count - i - 1];
+        for (0..self.frames.items.len) |i| {
+            const frame = &self.frames.items[self.frames.items.len - i - 1];
             const function = frame.closure.function;
             const instruction = frame.ip - 1;
             std.debug.print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
@@ -136,7 +138,7 @@ pub const VM = struct {
         return self.stack.items[self.stack.items.len - 1 - distance];
     }
 
-    fn call(self: *VM, closure: *const ObjClosure, arg_count: u8) RuntimeError!void {
+    fn call(self: *VM, closure: *ObjClosure, arg_count: u8) RuntimeError!void {
         if (arg_count != closure.function.arity) {
             return self.runtimeError(
                 error.InvalidOperand,
@@ -145,23 +147,17 @@ pub const VM = struct {
             );
         }
 
-        if (self.frame_count == frames_max) {
-            return self.runtimeError(
-                error.StackOverflow,
-                "Stack overflow.",
-                .{},
-            );
-        }
-
-        const frame = &self.frames[self.frame_count];
-        frame.* = .{
+        self.frames.appendBounded(.{
             .closure = closure,
             .ip = 0,
             // The frame starts at stack_top - (arg_count + 1),
             // pointing to the function followed by its arguments.
             .slots = (self.stack.items.ptr + self.stack.items.len) - (arg_count + 1),
-        };
-        self.frame_count += 1;
+        }) catch return self.runtimeError(
+            error.StackOverflow,
+            "Stack overflow.",
+            .{},
+        );
     }
 
     fn callValue(self: *VM, callee: Value, arg_count: u8) RuntimeError!void {
@@ -195,10 +191,9 @@ pub const VM = struct {
         var previous: ?*ObjUpvalue = null;
         var current: ?*ObjUpvalue = self.open_upvalues;
 
-        while (current) |cur| {
+        while (current) |cur| : (current = cur.next) {
             if (cur.location - local <= 0) break;
             previous = cur;
-            current = cur.next;
         }
 
         if (current) |cur| {
@@ -218,11 +213,10 @@ pub const VM = struct {
     }
 
     fn closeUpvalues(self: *VM, last: [*]Value) void {
-        while (self.open_upvalues) |upvalue| {
+        while (self.open_upvalues) |upvalue| : (self.open_upvalues = upvalue.next) {
             if (upvalue.location - last < 0) break;
             upvalue.closed = upvalue.location[0];
             upvalue.location = @ptrCast(&upvalue.closed);
-            self.open_upvalues = upvalue.next;
         }
     }
 
@@ -258,7 +252,7 @@ pub const VM = struct {
     }
 
     fn run(self: *VM) RuntimeError!void {
-        var frame = &self.frames[self.frame_count - 1];
+        var frame = &self.frames.items[self.frames.items.len - 1];
 
         while (true) {
             if (comptime config.trace_execution) {
@@ -372,7 +366,7 @@ pub const VM = struct {
                 .call => {
                     const arg_count = frame.readByte();
                     try self.callValue(self.peek(arg_count), arg_count);
-                    frame = &self.frames[self.frame_count - 1];
+                    frame = &self.frames.items[self.frames.items.len - 1];
                 },
                 .closure => {
                     const function = frame.readConstant().obj.as(.function);
@@ -394,18 +388,19 @@ pub const VM = struct {
                 .@"return" => {
                     const result = self.pop();
                     self.closeUpvalues(frame.slots);
-                    self.frame_count -= 1;
-                    if (self.frame_count == 0) {
+
+                    const discarded = self.frames.pop() orelse unreachable;
+                    if (self.frames.items.len == 0) {
                         // Exit interpreter.
                         _ = self.pop();
                         return;
                     }
 
                     // Discard call frame.
-                    const len = frame.slots - self.stack.items.ptr;
+                    const len = discarded.slots - self.stack.items.ptr;
                     self.stack.shrinkRetainingCapacity(len);
                     self.push(result);
-                    frame = &self.frames[self.frame_count - 1];
+                    frame = &self.frames.items[self.frames.items.len - 1];
                 },
             }
         }

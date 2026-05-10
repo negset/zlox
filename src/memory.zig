@@ -10,12 +10,16 @@ const Table = std.HashMapUnmanaged(
 const ObjType = @import("object.zig").ObjType;
 const Obj = @import("object.zig").Obj;
 const ObjString = @import("object.zig").ObjString;
+const ObjUpvalue = @import("object.zig").ObjUpvalue;
 const Value = @import("value.zig").Value;
+const CallFrame = @import("vm.zig").CallFrame;
 const config = @import("config");
 
 pub const Roots = struct {
+    frames: *std.ArrayList(CallFrame),
     stack: *std.ArrayList(Value),
     globals: *Table,
+    open_upvalues: ?*ObjUpvalue,
 };
 
 pub const GC = struct {
@@ -66,14 +70,14 @@ pub const GC = struct {
 
     pub fn freeObjects(self: *@This()) void {
         var curr = self.objects;
-        while (curr) |obj| {
+        var next: ?*Obj = null;
+        while (curr) |obj| : (curr = next) {
             if (comptime config.log_gc) {
                 std.debug.print("{*} free type {}\n", .{ obj, obj.obj_type });
             }
 
-            const next = obj.next;
+            next = obj.next;
             obj.destroy(self.allocator());
-            curr = next;
         }
         self.objects = null;
     }
@@ -115,6 +119,15 @@ pub const GC = struct {
         for (self.roots.stack.items) |slot| {
             markValue(slot);
         }
+
+        for (self.roots.frames.items) |frame| {
+            markObject(&frame.closure.obj);
+        }
+
+        // var upvalue = self.roots.open_upvalues;
+        // while (upvalue) |curr| : (upvalue = curr.next) {
+        //     markObject(&curr.obj);
+        // }
 
         markTable(self.roots.globals);
     }
