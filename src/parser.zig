@@ -198,7 +198,7 @@ pub const Parser = struct {
         std.mem.writeInt(u16, buf, @intCast(distance), .big);
     }
 
-    pub fn endCompiler(self: *Parser) Error!*const ObjFunction {
+    pub fn endCompiler(self: *Parser) Error!*ObjFunction {
         try self.emitReturn();
         const obj_function = self.compiler.function.?;
 
@@ -786,7 +786,7 @@ pub const Parser = struct {
         }
     }
 
-    pub fn run(self: *Parser) Error!*const ObjFunction {
+    pub fn run(self: *Parser) Error!*ObjFunction {
         var compiler = try Compiler.init(
             self.gc,
             null,

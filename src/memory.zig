@@ -2,7 +2,7 @@ const std = @import("std");
 const Alignment = std.mem.Alignment;
 const Allocator = std.mem.Allocator;
 const Table = std.HashMapUnmanaged(
-    *const ObjString,
+    *ObjString,
     Value,
     ObjString.Context,
     75,
@@ -13,16 +13,23 @@ const ObjString = @import("object.zig").ObjString;
 const Value = @import("value.zig").Value;
 const config = @import("config");
 
+pub const Roots = struct {
+    stack: *std.ArrayList(Value),
+    globals: *Table,
+};
+
 pub const GC = struct {
     backing: Allocator,
     strings: Table,
     objects: ?*Obj,
+    roots: Roots,
 
-    pub fn init(backing: Allocator) @This() {
+    pub fn init(backing: Allocator, roots: Roots) @This() {
         return .{
             .backing = backing,
             .strings = .empty,
             .objects = null,
+            .roots = roots,
         };
     }
 
@@ -46,6 +53,7 @@ pub const GC = struct {
     pub fn createObject(self: *@This(), comptime obj_type: ObjType) Allocator.Error!*obj_type.Impl() {
         const new = try self.allocator().create(obj_type.Impl());
         new.obj.obj_type = obj_type;
+        new.obj.is_marked = false;
         new.obj.next = self.objects;
         self.objects = &new.obj;
 
@@ -70,22 +78,53 @@ pub const GC = struct {
         self.objects = null;
     }
 
-    pub fn findString(self: *@This(), string: []const u8, hash: u64) ?*const ObjString {
-        return self.strings.getKey(&.{
+    pub fn findString(self: *@This(), string: []const u8, hash: u64) ?*ObjString {
+        var key = ObjString{
             .obj = undefined,
             .string = string,
             .hash = hash,
-        });
+        };
+        return self.strings.getKey(&key);
     }
 
-    fn markRoots() void {}
+    fn markObject(object: ?*Obj) void {
+        if (object) |obj| {
+            if (comptime config.log_gc) {
+                std.debug.print("{*} mark ", .{obj});
+                (Value{ .obj = obj }).print();
+                std.debug.print("\n", .{});
+            }
 
-    fn collectGarbage() void {
+            obj.is_marked = true;
+        }
+    }
+
+    fn markValue(value: Value) void {
+        if (value == .obj) markObject(value.obj);
+    }
+
+    fn markTable(table: *Table) void {
+        var iter = table.iterator();
+        while (iter.next()) |entry| {
+            markObject(&entry.key_ptr.*.obj);
+            markValue(entry.value_ptr.*);
+        }
+    }
+
+    fn markRoots(self: *@This()) void {
+        for (self.roots.stack.items) |slot| {
+            markValue(slot);
+        }
+
+        markTable(self.roots.globals);
+    }
+
+    fn collectGarbage(self: *@This()) void {
         if (comptime config.log_gc) {
             std.debug.print("-- gc begin\n", .{});
         }
 
-        markRoots();
+        self.markRoots();
 
         if (comptime config.log_gc) {
             std.debug.print("-- gc end\n", .{});
@@ -98,13 +137,13 @@ pub const GC = struct {
         alignment: Alignment,
         ret_addr: usize,
     ) ?[*]u8 {
-        std.debug.print("[alloc] len: {}\n", .{len});
-
-        if (comptime config.stress_gc) {
-            collectGarbage();
-        }
+        // std.debug.print("[alloc] len: {}\n", .{len});
 
         const self: *@This() = @ptrCast(@alignCast(ctx));
+
+        if (comptime config.stress_gc) {
+            self.collectGarbage();
+        }
 
         const ptr = self.backing.rawAlloc(len, alignment, ret_addr) orelse return null;
 
@@ -118,25 +157,25 @@ pub const GC = struct {
         new_len: usize,
         ret_addr: usize,
     ) bool {
-        std.debug.print("[resize] len: {} -> {}, ptr: {*}\n", .{ memory.len, new_len, memory.ptr });
-
-        if (new_len > memory.len) {
-            collectGarbage();
-        }
+        // std.debug.print("[resize] len: {} -> {}, ptr: {*}\n", .{ memory.len, new_len, memory.ptr });
 
         const self: *@This() = @ptrCast(@alignCast(ctx));
+
+        if (new_len > memory.len) {
+            self.collectGarbage();
+        }
 
         return self.backing.rawResize(memory, alignment, new_len, ret_addr);
     }
 
     fn remap(ctx: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-        std.debug.print("[remap] len: {} -> {}, ptr: {*}\n", .{ memory.len, new_len, memory.ptr });
-
-        if (new_len > memory.len) {
-            collectGarbage();
-        }
+        // std.debug.print("[remap] len: {} -> {}, ptr: {*}\n", .{ memory.len, new_len, memory.ptr });
 
         const self: *@This() = @ptrCast(@alignCast(ctx));
+
+        if (new_len > memory.len) {
+            self.collectGarbage();
+        }
 
         const ptr = self.backing.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
 
@@ -144,7 +183,7 @@ pub const GC = struct {
     }
 
     fn free(ctx: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
-        std.debug.print("[free] len: {}, ptr: {*}\n", .{ memory.len, memory.ptr });
+        // std.debug.print("[free] len: {}, ptr: {*}\n", .{ memory.len, memory.ptr });
 
         const self: *@This() = @ptrCast(@alignCast(ctx));
 

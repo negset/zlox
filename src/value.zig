@@ -6,7 +6,7 @@ pub const Value = union(enum) {
     bool: bool,
     nil: void,
     number: f64,
-    obj: *const Obj,
+    obj: *Obj,
 
     pub fn print(self: Value) void {
         switch (self) {

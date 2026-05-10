@@ -25,14 +25,15 @@ pub const ObjType = enum {
 
 pub const Obj = struct {
     obj_type: ObjType,
+    is_marked: bool,
     next: ?*Obj,
 
-    pub fn as(self: *const Obj, comptime obj_type: ObjType) *const obj_type.Impl() {
+    pub fn as(self: *Obj, comptime obj_type: ObjType) *obj_type.Impl() {
         if (self.obj_type != obj_type) @panic("Invalid Obj cast.");
         return @ptrCast(self);
     }
 
-    pub fn destroy(self: *const Obj, gpa: Allocator) void {
+    pub fn destroy(self: *Obj, gpa: Allocator) void {
         switch (self.obj_type) {
             inline else => |obj_type| {
                 self.as(obj_type).destroy(gpa);
@@ -40,7 +41,7 @@ pub const Obj = struct {
         }
     }
 
-    pub fn print(self: *const Obj) void {
+    pub fn print(self: *Obj) void {
         switch (self.obj_type) {
             inline else => |obj_type| {
                 self.as(obj_type).print();
@@ -117,7 +118,7 @@ pub const ObjNative = struct {
 
     pub const NativeFn = *const fn (vm: *VM, arg_count: u8, args: [*]Value) Value;
 
-    pub fn create(gc: *GC, native_fn: NativeFn) Allocator.Error!*const @This() {
+    pub fn create(gc: *GC, native_fn: NativeFn) Allocator.Error!*@This() {
         const new = try gc.createObject(.native);
         new.native_fn = native_fn;
         return new;
@@ -137,7 +138,7 @@ pub const ObjString = struct {
     string: []const u8,
     hash: u64,
 
-    fn create(gc: *GC, string: []const u8, hash: u64) Allocator.Error!*const @This() {
+    fn create(gc: *GC, string: []const u8, hash: u64) Allocator.Error!*@This() {
         const new = try gc.createObject(.string);
         new.string = string;
         new.hash = hash;
@@ -145,7 +146,7 @@ pub const ObjString = struct {
         return new;
     }
 
-    pub fn createByCopy(gc: *GC, string: []const u8) Allocator.Error!*const @This() {
+    pub fn createByCopy(gc: *GC, string: []const u8) Allocator.Error!*@This() {
         const hash = std.hash.Fnv1a_64.hash(string);
         if (gc.findString(string, hash)) |interned| {
             return interned;
@@ -155,7 +156,7 @@ pub const ObjString = struct {
         return create(gc, copied, hash);
     }
 
-    pub fn createByTake(gc: *GC, string: []const u8) Allocator.Error!*const @This() {
+    pub fn createByTake(gc: *GC, string: []const u8) Allocator.Error!*@This() {
         const hash = std.hash.Fnv1a_64.hash(string);
         if (gc.findString(string, hash)) |interned| {
             gc.allocator().free(string);

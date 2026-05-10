@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Table = std.HashMapUnmanaged(
-    *const ObjString,
+    *ObjString,
     Value,
     ObjString.Context,
     75,
@@ -39,19 +39,19 @@ const CallFrame = struct {
         return self.closure.function.chunk.constants.items[self.readByte()];
     }
 
-    pub fn readString(self: *CallFrame) *const ObjString {
+    pub fn readString(self: *CallFrame) *ObjString {
         return self.readConstant().obj.as(.string);
     }
 };
 
 pub const VM = struct {
+    gc: GC,
+    io: std.Io,
     frames: [frames_max]CallFrame,
     frame_count: usize,
     stack: std.ArrayList(Value),
     globals: Table,
     open_upvalues: ?*ObjUpvalue,
-    gc: *GC,
-    io: std.Io,
 
     const RuntimeError = error{ InvalidOperand, StackOverflow } || Allocator.Error;
     const Error = RuntimeError || Parser.Error;
@@ -59,18 +59,18 @@ pub const VM = struct {
     const frames_max = 64;
     const stack_max = frames_max * Compiler.u8_count;
 
-    pub fn init(gc: *GC, io: std.Io) Allocator.Error!VM {
-        var new = VM{
-            .frames = undefined,
-            .frame_count = 0,
-            .stack = try .initCapacity(gc.allocator(), stack_max),
-            .globals = .empty,
-            .open_upvalues = null,
-            .gc = gc,
-            .io = io,
-        };
-        try new.defineNative("clock", clockNative);
-        return new;
+    pub fn init(self: *VM, gpa: Allocator, io: std.Io) Allocator.Error!void {
+        self.gc = GC.init(gpa, .{
+            .stack = &self.stack,
+            .globals = &self.globals,
+        });
+        self.io = io;
+        self.frame_count = 0;
+        self.stack = try .initCapacity(gpa, stack_max);
+        self.globals = .empty;
+        self.open_upvalues = null;
+
+        try self.defineNative("clock", clockNative);
     }
 
     pub fn deinit(self: *VM) void {
@@ -110,8 +110,8 @@ pub const VM = struct {
     }
 
     fn defineNative(self: *VM, name: []const u8, native_fn: ObjNative.NativeFn) Allocator.Error!void {
-        const obj_string = try ObjString.createByCopy(self.gc, name);
-        const obj_native = try ObjNative.create(self.gc, native_fn);
+        const obj_string = try ObjString.createByCopy(&self.gc, name);
+        const obj_native = try ObjNative.create(&self.gc, native_fn);
         // To prevent GC from collecting name and function, store them temporarily on the stack.
         self.push(Value{ .obj = &obj_string.obj });
         self.push(Value{ .obj = &obj_native.obj });
@@ -205,7 +205,7 @@ pub const VM = struct {
             if (cur.location == local) return cur;
         }
 
-        const new = try ObjUpvalue.create(self.gc, local);
+        const new = try ObjUpvalue.create(&self.gc, local);
         new.next = current;
 
         if (previous) |prev| {
@@ -231,7 +231,7 @@ pub const VM = struct {
         const a = self.pop().obj.as(.string).string;
         const string = try std.mem.concat(self.gc.allocator(), u8, &.{ a, b });
 
-        const result = try ObjString.createByTake(self.gc, string);
+        const result = try ObjString.createByTake(&self.gc, string);
         self.push(Value{ .obj = &result.obj });
     }
 
@@ -376,7 +376,7 @@ pub const VM = struct {
                 },
                 .closure => {
                     const function = frame.readConstant().obj.as(.function);
-                    const closure = try ObjClosure.create(self.gc, function);
+                    const closure = try ObjClosure.create(&self.gc, function);
                     self.push(.{ .obj = &closure.obj });
                     for (0..closure.upvalues.len) |i| {
                         const is_local = frame.readByte();
@@ -412,12 +412,12 @@ pub const VM = struct {
     }
 
     pub fn interpret(self: *VM, source: []const u8) Error!void {
-        var parser = Parser.init(source, self.gc);
+        var parser = Parser.init(source, &self.gc);
         const function = try parser.run();
 
         // To prevent GC from collecting "function", store it temporarily on the stack.
         self.push(.{ .obj = &function.obj });
-        const closure = try ObjClosure.create(self.gc, function);
+        const closure = try ObjClosure.create(&self.gc, function);
         _ = self.pop();
         self.push(Value{ .obj = &closure.obj });
         try self.call(closure, 0);

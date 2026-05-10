@@ -54,13 +54,13 @@ fn runFile(gpa: Allocator, io: std.Io, vm: *VM, path: []const u8) void {
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
-    var gc = GC.init(init.gpa);
-    var vm = try VM.init(&gc, init.io);
+    var vm: VM = undefined;
+    try vm.init(init.gpa, init.io);
     defer vm.deinit();
 
     switch (args.len) {
         1 => repl(init.io, &vm),
-        2 => runFile(gc.allocator(), init.io, &vm, args[1]),
+        2 => runFile(init.gpa, init.io, &vm, args[1]),
         else => {
             std.debug.print("Usage: zlox [path]\n", .{});
             std.process.exit(64);
