@@ -19,7 +19,7 @@ pub const Roots = struct {
     frames: *std.ArrayList(CallFrame),
     stack: *std.ArrayList(Value),
     globals: *Table,
-    open_upvalues: ?*ObjUpvalue,
+    open_upvalues: *?*ObjUpvalue,
 };
 
 pub const GC = struct {
@@ -124,10 +124,10 @@ pub const GC = struct {
             markObject(&frame.closure.obj);
         }
 
-        // var upvalue = self.roots.open_upvalues;
-        // while (upvalue) |curr| : (upvalue = curr.next) {
-        //     markObject(&curr.obj);
-        // }
+        var upvalue = self.roots.open_upvalues.*;
+        while (upvalue) |curr| : (upvalue = curr.next) {
+            markObject(&curr.obj);
+        }
 
         markTable(self.roots.globals);
     }

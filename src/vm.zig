@@ -63,7 +63,7 @@ pub const VM = struct {
             .frames = &self.frames,
             .stack = &self.stack,
             .globals = &self.globals,
-            .open_upvalues = self.open_upvalues,
+            .open_upvalues = &self.open_upvalues,
         });
         self.io = io;
         self.frames = try .initCapacity(gpa, frames_max);
