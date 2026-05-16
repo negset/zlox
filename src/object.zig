@@ -52,10 +52,10 @@ pub const Obj = struct {
 
 pub const ObjClosure = struct {
     obj: Obj,
-    function: *const ObjFunction,
+    function: *ObjFunction,
     upvalues: []?*ObjUpvalue,
 
-    pub fn create(gc: *GC, function: *const ObjFunction) Allocator.Error!*@This() {
+    pub fn create(gc: *GC, function: *ObjFunction) Allocator.Error!*@This() {
         const upvalues = try gc.allocator().alloc(?*ObjUpvalue, function.upvalue_count);
         // Ensure GC never sees uninitialized memory.
         for (upvalues) |*upvalue| {
@@ -85,7 +85,7 @@ pub const ObjFunction = struct {
     upvalue_count: u8,
     chunk: Chunk,
     // Null if it is top-level code.
-    name: ?*const ObjString,
+    name: ?*ObjString,
 
     pub fn create(gc: *GC) Allocator.Error!*@This() {
         const new = try gc.createObject(.function);
@@ -140,6 +140,11 @@ pub const ObjString = struct {
 
     fn create(gc: *GC, string: []const u8, hash: u64) Allocator.Error!*@This() {
         const new = try gc.createObject(.string);
+
+        // To prevent GC from collecting new string, push it on root.
+        try gc.pushRoot(&new.obj);
+        defer gc.popRoot();
+
         new.string = string;
         new.hash = hash;
         try gc.strings.put(gc.allocator(), new, Value{ .nil = {} });

@@ -43,7 +43,7 @@ pub const Compiler = struct {
     ) Allocator.Error!@This() {
         var new = Compiler{
             .enclosing = enclosing,
-            // To prevent GC from collecting uninitialized "function"
+            // To prevent GC from dereferencing uninitialized "function" pointer
             // when calling "ObjFunction.create", set it null beforehand.
             .function = null,
             .function_type = function_type,

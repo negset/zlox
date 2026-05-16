@@ -59,24 +59,22 @@ pub const VM = struct {
     const stack_max = frames_max * Compiler.u8_count;
 
     pub fn init(self: *VM, gpa: Allocator, io: std.Io) Allocator.Error!void {
-        self.gc = GC.init(gpa, .{
-            .frames = &self.frames,
-            .stack = &self.stack,
-            .globals = &self.globals,
-            .open_upvalues = &self.open_upvalues,
-        });
+        self.gc = GC.init(gpa);
         self.io = io;
-        self.frames = try .initCapacity(gpa, frames_max);
-        self.stack = try .initCapacity(gpa, stack_max);
+
+        self.frames = try .initCapacity(self.gc.allocator(), frames_max);
+        self.stack = try .initCapacity(self.gc.allocator(), stack_max);
         self.globals = .empty;
         self.open_upvalues = null;
+
+        try self.gc.addRootMarker(self, markVMRoots);
 
         try self.defineNative("clock", clockNative);
     }
 
     pub fn deinit(self: *VM) void {
-        self.frames.deinit(self.gc.backing);
-        self.stack.deinit(self.gc.backing);
+        self.frames.deinit(self.gc.allocator());
+        self.stack.deinit(self.gc.allocator());
         self.globals.deinit(self.gc.allocator());
         self.gc.deinit();
     }
@@ -113,17 +111,20 @@ pub const VM = struct {
 
     fn defineNative(self: *VM, name: []const u8, native_fn: ObjNative.NativeFn) Allocator.Error!void {
         const obj_string = try ObjString.createByCopy(&self.gc, name);
+        // To prevent GC from collecting obj_string, push it on root.
+        try self.gc.pushRoot(&obj_string.obj);
+        defer _ = self.gc.popRoot();
+
         const obj_native = try ObjNative.create(&self.gc, native_fn);
-        // To prevent GC from collecting name and function, store them temporarily on the stack.
-        self.push(Value{ .obj = &obj_string.obj });
-        self.push(Value{ .obj = &obj_native.obj });
+        // To prevent GC from collecting obj_native, push it on root.
+        try self.gc.pushRoot(&obj_native.obj);
+        defer _ = self.gc.popRoot();
+
         try self.globals.put(
             self.gc.allocator(),
-            self.stack.items[0].obj.as(.string),
-            self.stack.items[1],
+            obj_string,
+            .{ .obj = &obj_native.obj },
         );
-        _ = self.pop();
-        _ = self.pop();
     }
 
     fn push(self: *VM, value: Value) void {
@@ -221,8 +222,12 @@ pub const VM = struct {
     }
 
     fn concatenate(self: *VM) Allocator.Error!void {
-        const b = self.pop().obj.as(.string).string;
-        const a = self.pop().obj.as(.string).string;
+        // To prevent GC from collecting a and b, use peek insted of pop.
+        const b = self.peek(0).obj.as(.string).string;
+        const a = self.peek(1).obj.as(.string).string;
+        defer _ = self.pop();
+        defer _ = self.pop();
+
         const string = try std.mem.concat(self.gc.allocator(), u8, &.{ a, b });
 
         const result = try ObjString.createByTake(&self.gc, string);
@@ -293,7 +298,7 @@ pub const VM = struct {
                 .define_global => {
                     const name = frame.readString();
                     // To prevent GC from collecting the value when calling "globals.put",
-                    // use "peek" instead of "pop".
+                    // use peek instead of pop.
                     try self.globals.put(self.gc.allocator(), name, self.peek(0));
                     _ = self.pop();
                 },
@@ -407,16 +412,37 @@ pub const VM = struct {
     }
 
     pub fn interpret(self: *VM, source: []const u8) Error!void {
-        var parser = Parser.init(source, &self.gc);
+        var parser: Parser = undefined;
+        try parser.init(source, &self.gc);
         const function = try parser.run();
 
-        // To prevent GC from collecting "function", store it temporarily on the stack.
-        self.push(.{ .obj = &function.obj });
+        // To prevent GC from collecting "function", push it on root.
+        try self.gc.pushRoot(&function.obj);
+        defer self.gc.popRoot();
+
         const closure = try ObjClosure.create(&self.gc, function);
-        _ = self.pop();
         self.push(Value{ .obj = &closure.obj });
         try self.call(closure, 0);
 
         try self.run();
+    }
+
+    fn markVMRoots(ptr: *anyopaque, gc: *GC) void {
+        const self: *VM = @ptrCast(@alignCast(ptr));
+
+        for (self.stack.items) |slot| {
+            gc.markValue(slot);
+        }
+
+        for (self.frames.items) |frame| {
+            gc.markObject(&frame.closure.obj);
+        }
+
+        var upvalue = self.open_upvalues;
+        while (upvalue) |curr| : (upvalue = curr.next) {
+            gc.markObject(&curr.obj);
+        }
+
+        gc.markTable(&self.globals);
     }
 };

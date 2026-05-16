@@ -46,25 +46,26 @@ const ParseRule = struct {
 
 pub const Parser = struct {
     scanner: Scanner,
-    compiler: *Compiler = undefined,
+    compiler: ?*Compiler,
     gc: *GC,
-    current: Token = undefined,
-    previous: Token = undefined,
+    current: Token,
+    previous: Token,
 
     pub const Error = error{
         InvalidSyntax,
         TooManyElements,
     } || Allocator.Error;
 
-    pub fn init(source: []const u8, gc: *GC) Parser {
-        return .{
-            .scanner = .init(source),
-            .gc = gc,
-        };
+    pub fn init(self: *Parser, source: []const u8, gc: *GC) Allocator.Error!void {
+        self.scanner = .init(source);
+        self.compiler = null;
+        self.gc = gc;
+
+        try gc.addRootMarker(self, markParserRoots);
     }
 
     fn currentChunk(self: *Parser) *Chunk {
-        return &self.compiler.function.?.chunk;
+        return &self.compiler.?.function.?.chunk;
     }
 
     fn errorAt(token: Token, err: Error, message: []const u8) Error {
@@ -165,6 +166,12 @@ pub const Parser = struct {
     }
 
     fn makeConstant(self: *Parser, value: Value) Error!u8 {
+        // To prevent GC from collecting value, push it on root.
+        if (value == .obj) {
+            try self.gc.pushRoot(value.obj);
+            defer self.gc.popRoot();
+        }
+
         const index = try self.currentChunk().addConstant(self.gc.allocator(), value);
         // Make sure the chunk does not contain too many constants,
         // since OpCode.constant uses a single byte for its index operand.
@@ -200,25 +207,25 @@ pub const Parser = struct {
 
     pub fn endCompiler(self: *Parser) Error!*ObjFunction {
         try self.emitReturn();
-        const obj_function = self.compiler.function.?;
+        const obj_function = self.compiler.?.function.?;
 
         if (comptime config.print_code) {
             const name = if (obj_function.name) |n| n.string else "<script>";
             debug.disassembleChunk(self.currentChunk(), name);
         }
 
-        if (self.compiler.enclosing) |enclosing| {
+        if (self.compiler.?.enclosing) |enclosing| {
             self.compiler = enclosing;
         }
         return obj_function;
     }
 
     pub fn beginScope(self: *Parser) void {
-        self.compiler.scope_depth += 1;
+        self.compiler.?.scope_depth += 1;
     }
 
     pub fn endScope(self: *Parser) Error!void {
-        const c = self.compiler;
+        const c = self.compiler.?;
         c.scope_depth -= 1;
 
         while (c.local_count > 0 and c.locals[c.local_count - 1].depth.? > c.scope_depth) : (c.local_count -= 1) {
@@ -232,6 +239,10 @@ pub const Parser = struct {
 
     fn identifierConstant(self: *Parser, name: Token) Error!u8 {
         const obj_string = try ObjString.createByCopy(self.gc, name.lexeme);
+        // To prevent GC from collecting obj_string, push it on root.
+        try self.gc.pushRoot(&obj_string.obj);
+        defer self.gc.popRoot();
+
         return self.makeConstant(.{ .obj = &obj_string.obj });
     }
 
@@ -295,15 +306,17 @@ pub const Parser = struct {
     }
 
     fn addLocal(self: *Parser, name: Token) Error!void {
-        if (self.compiler.local_count == Compiler.u8_count) {
+        const c = self.compiler.?;
+
+        if (c.local_count == Compiler.u8_count) {
             return self.errorAtPrevious(
                 error.TooManyElements,
                 "Too many local variables in function.",
             );
         }
 
-        defer self.compiler.local_count += 1;
-        const local = &self.compiler.locals[self.compiler.local_count];
+        defer c.local_count += 1;
+        const local = &c.locals[c.local_count];
         local.* = .{
             .name = name,
             .depth = null,
@@ -312,14 +325,16 @@ pub const Parser = struct {
     }
 
     fn declareVariable(self: *Parser) Error!void {
+        const c = self.compiler.?;
+
         // Skip global variable.
-        if (self.compiler.scope_depth == 0) return;
+        if (c.scope_depth == 0) return;
 
         const name = self.previous;
-        for (0..self.compiler.local_count) |i| {
-            const local = &self.compiler.locals[self.compiler.local_count - i - 1];
+        for (0..c.local_count) |i| {
+            const local = &c.locals[c.local_count - i - 1];
             if (local.depth) |depth| {
-                if (depth < self.compiler.scope_depth) break;
+                if (depth < c.scope_depth) break;
             }
 
             if (name.identifierEquals(local.name)) {
@@ -338,13 +353,13 @@ pub const Parser = struct {
 
         try self.declareVariable();
         // If in a local scope, return dummy index.
-        if (self.compiler.scope_depth > 0) return 0;
+        if (self.compiler.?.scope_depth > 0) return 0;
 
         return self.identifierConstant(self.previous);
     }
 
     fn markInitialized(self: *Parser) void {
-        const c = self.compiler;
+        const c = self.compiler.?;
         // Skip global.
         if (c.scope_depth == 0) return;
         c.locals[c.local_count - 1].depth = c.scope_depth;
@@ -352,7 +367,7 @@ pub const Parser = struct {
 
     fn defineVariable(self: *Parser, global: u8) Error!void {
         // If in a local scope, use stack value as a local variable.
-        if (self.compiler.scope_depth > 0) {
+        if (self.compiler.?.scope_depth > 0) {
             self.markInitialized();
             return;
         }
@@ -456,11 +471,11 @@ pub const Parser = struct {
         var get_op: OpCode = undefined;
         var set_op: OpCode = undefined;
         var arg: u8 = undefined;
-        if (try self.resolveLocal(self.compiler, name)) |local| {
+        if (try self.resolveLocal(self.compiler.?, name)) |local| {
             get_op = .get_local;
             set_op = .set_local;
             arg = local;
-        } else if (try self.resolveUpvalue(self.compiler, name)) |upvalue| {
+        } else if (try self.resolveUpvalue(self.compiler.?, name)) |upvalue| {
             get_op = .get_upvalue;
             set_op = .set_upvalue;
             arg = upvalue;
@@ -568,13 +583,13 @@ pub const Parser = struct {
         try self.consume(.left_paren, "Expect '(' after function name.");
         if (!self.check(.right_paren)) {
             while (true) {
-                if (self.compiler.function.?.arity == 255) {
+                if (self.compiler.?.function.?.arity == 255) {
                     return self.errorAtCurrent(
                         error.TooManyElements,
                         "Can't have more than 255 parameters.",
                     );
                 }
-                self.compiler.function.?.arity += 1;
+                self.compiler.?.function.?.arity += 1;
                 const constant = try self.parseVariable("Expect parameter name.");
                 try self.defineVariable(constant);
                 if (!try self.match(.comma)) break;
@@ -703,7 +718,7 @@ pub const Parser = struct {
     }
 
     fn returnStatement(self: *Parser) Error!void {
-        if (self.compiler.function_type == .script) {
+        if (self.compiler.?.function_type == .script) {
             return self.errorAtPrevious(
                 error.InvalidSyntax,
                 "Can't return from top-level code.",
@@ -804,5 +819,11 @@ pub const Parser = struct {
             };
         }
         return if (first_error) |err| err else try self.endCompiler();
+    }
+
+    fn markParserRoots(ptr: *anyopaque, gc: *GC) void {
+        const self: *Parser = @ptrCast(@alignCast(ptr));
+
+        gc.markCompilers(self.compiler);
     }
 };
