@@ -2,21 +2,26 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Chunk = @import("chunk.zig").Chunk;
 const GC = @import("memory.zig").GC;
+const Table = @import("memory.zig").Table;
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
 const config = @import("config");
 
 pub const ObjType = enum {
+    class,
     closure,
     function,
+    instance,
     native,
     string,
     upvalue,
 
     pub fn Impl(comptime obj_type: ObjType) type {
         return switch (obj_type) {
+            .class => ObjClass,
             .closure => ObjClosure,
             .function => ObjFunction,
+            .instance => ObjInstance,
             .native => ObjNative,
             .string => ObjString,
             .upvalue => ObjUpvalue,
@@ -38,7 +43,7 @@ pub const Obj = struct {
         switch (self.obj_type) {
             inline else => |obj_type| {
                 if (comptime config.log_gc) {
-                    std.debug.print("{*} free type {}\n", .{ self, self.obj_type });
+                    std.debug.print("0x{x} free type {}\n", .{ @intFromPtr(self), self.obj_type });
                 }
 
                 self.as(obj_type).destroy(gpa);
@@ -52,6 +57,26 @@ pub const Obj = struct {
                 self.as(obj_type).print();
             },
         }
+    }
+};
+
+pub const ObjClass = struct {
+    obj: Obj,
+    name: *ObjString,
+
+    pub fn create(gc: *GC, name: *ObjString) Allocator.Error!*@This() {
+        const new = try gc.createObject(.class);
+        new.name = name;
+        return new;
+    }
+
+    pub fn destroy(self: *@This(), gpa: Allocator) void {
+        gpa.destroy(self);
+        // Don't free "name" because GC manages it.
+    }
+
+    pub fn print(self: *const @This()) void {
+        std.debug.print("{s}", .{self.name.string});
     }
 };
 
@@ -113,6 +138,29 @@ pub const ObjFunction = struct {
         } else {
             std.debug.print("<script>", .{});
         }
+    }
+};
+
+pub const ObjInstance = struct {
+    obj: Obj,
+    class: *ObjClass,
+    fields: Table,
+
+    pub fn create(gc: *GC, class: *ObjClass) Allocator.Error!*@This() {
+        const new = try gc.createObject(.instance);
+        new.class = class;
+        new.fields = .empty;
+        return new;
+    }
+
+    pub fn destroy(self: *@This(), gpa: Allocator) void {
+        // Don't free "fields" entries, because GC manages them.
+        self.fields.deinit(gpa);
+        gpa.destroy(self);
+    }
+
+    pub fn print(self: *const @This()) void {
+        std.debug.print("{s} instance", .{self.class.name.string});
     }
 };
 

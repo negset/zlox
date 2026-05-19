@@ -1,17 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Table = std.HashMapUnmanaged(
-    *ObjString,
-    Value,
-    ObjString.Context,
-    75,
-);
 const OpCode = @import("chunk.zig").OpCode;
 const Compiler = @import("compiler.zig").Compiler;
 const Parser = @import("parser.zig").Parser;
 const GC = @import("memory.zig").GC;
+const Table = @import("memory.zig").Table;
+const ObjClass = @import("object.zig").ObjClass;
 const ObjClosure = @import("object.zig").ObjClosure;
 const ObjFunction = @import("object.zig").ObjFunction;
+const ObjInstance = @import("object.zig").ObjInstance;
 const ObjNative = @import("object.zig").ObjNative;
 const ObjString = @import("object.zig").ObjString;
 const ObjUpvalue = @import("object.zig").ObjUpvalue;
@@ -164,6 +161,13 @@ pub const VM = struct {
     fn callValue(self: *VM, callee: Value, arg_count: u8) RuntimeError!void {
         if (callee == .obj) {
             switch (callee.obj.obj_type) {
+                .class => {
+                    const class = callee.obj.as(.class);
+                    const instance = try ObjInstance.create(&self.gc, class);
+                    const index = self.stack.items.len - 1 - arg_count;
+                    self.stack.items[index] = Value{ .obj = &instance.obj };
+                    return;
+                },
                 .closure => {
                     try self.call(callee.obj.as(.closure), arg_count);
                     return;
@@ -172,9 +176,9 @@ pub const VM = struct {
                     const native = callee.obj.as(.native);
                     const args = self.stack.items.ptr + self.stack.items.len - arg_count;
                     const result = native.native_fn(self, arg_count, args);
-                    // Discard args and native function name.
-                    const len = self.stack.items.len - (arg_count + 1);
-                    self.stack.shrinkRetainingCapacity(len);
+                    // Discard args and name of native function.
+                    const new_len = self.stack.items.len - arg_count - 1;
+                    self.stack.shrinkRetainingCapacity(new_len);
                     self.push(result);
                     return;
                 },
@@ -322,6 +326,45 @@ pub const VM = struct {
                     const slot = frame.readByte();
                     frame.closure.upvalues[slot].?.location[0] = self.peek(0);
                 },
+                .get_property => {
+                    if (!self.peek(0).isObjType(.instance)) {
+                        return self.runtimeError(
+                            error.InvalidOperand,
+                            "Only instances have properties.",
+                            .{},
+                        );
+                    }
+
+                    const instance = self.peek(0).obj.as(.instance);
+                    const name = frame.readString();
+
+                    if (instance.fields.get(name)) |value| {
+                        _ = self.pop(); // Instance.
+                        self.push(value);
+                    } else {
+                        return self.runtimeError(
+                            error.InvalidOperand,
+                            "Undefined property '{s}'.",
+                            .{name.string},
+                        );
+                    }
+                },
+                .set_property => {
+                    if (!self.peek(1).isObjType(.instance)) {
+                        return self.runtimeError(
+                            error.InvalidOperand,
+                            "Only instances have properties.",
+                            .{},
+                        );
+                    }
+
+                    const instance = self.peek(1).obj.as(.instance);
+                    const obj_string = frame.readString();
+                    try instance.fields.put(self.gc.allocator(), obj_string, self.peek(0));
+                    const value = self.pop();
+                    _ = self.pop(); // Instance.
+                    self.push(value);
+                },
                 .equal => {
                     const b = self.pop();
                     const a = self.pop();
@@ -338,11 +381,13 @@ pub const VM = struct {
                         try self.concatenate();
                     } else if (self.peek(0) == .number and self.peek(1) == .number) {
                         try self.binaryOp(.add);
-                    } else return self.runtimeError(
-                        error.InvalidOperand,
-                        "Operands must be two numbers or two strings.",
-                        .{},
-                    );
+                    } else {
+                        return self.runtimeError(
+                            error.InvalidOperand,
+                            "Operands must be two numbers or two strings.",
+                            .{},
+                        );
+                    }
                 },
                 .not => self.push(.{ .bool = self.pop().isFalsey() }),
                 .negate => switch (self.peek(0)) {
@@ -407,6 +452,11 @@ pub const VM = struct {
                     self.stack.shrinkRetainingCapacity(len);
                     self.push(result);
                     frame = &self.frames.items[self.frames.items.len - 1];
+                },
+                .class => {
+                    const name = frame.readString();
+                    const class = try ObjClass.create(&self.gc, name);
+                    self.push(Value{ .obj = &class.obj });
                 },
             }
         }

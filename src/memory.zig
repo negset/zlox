@@ -1,12 +1,6 @@
 const std = @import("std");
 const Alignment = std.mem.Alignment;
 const Allocator = std.mem.Allocator;
-const Table = std.HashMapUnmanaged(
-    *ObjString,
-    Value,
-    ObjString.Context,
-    75,
-);
 const Compiler = @import("compiler.zig").Compiler;
 const ObjType = @import("object.zig").ObjType;
 const Obj = @import("object.zig").Obj;
@@ -15,6 +9,13 @@ const ObjUpvalue = @import("object.zig").ObjUpvalue;
 const Value = @import("value.zig").Value;
 const CallFrame = @import("vm.zig").CallFrame;
 const config = @import("config");
+
+pub const Table = std.HashMapUnmanaged(
+    *ObjString,
+    Value,
+    ObjString.Context,
+    75,
+);
 
 const MarkFn = *const fn (ptr: *anyopaque, gc: *GC) void;
 
@@ -27,21 +28,11 @@ pub const GC = struct {
     backing: Allocator,
     strings: Table,
     objects: ?*Obj,
+    temp_root: std.ArrayList(*Obj),
     markers: std.ArrayList(RootMarker),
     gray_stack: std.ArrayList(*Obj),
     bytes_allocated: usize,
     next_gc: usize,
-    temp_root: std.ArrayList(*Obj),
-
-    pub fn pushRoot(self: *@This(), object: *Obj) Allocator.Error!void {
-        // "temp_root" uses backing instead of allocator(),
-        // to prevent the GC from recursively starting a new GC.
-        try self.temp_root.append(self.backing, object);
-    }
-
-    pub fn popRoot(self: *@This()) void {
-        _ = self.temp_root.pop();
-    }
 
     const heap_grow_factor = 2;
 
@@ -86,7 +77,7 @@ pub const GC = struct {
         self.objects = &new.obj;
 
         if (comptime config.log_gc) {
-            std.debug.print("{*} allocate {} for {}\n", .{ new, @sizeOf(obj_type.Impl()), obj_type });
+            std.debug.print("0x{x} allocate {} for {}\n", .{ @intFromPtr(new), @sizeOf(obj_type.Impl()), obj_type });
         }
 
         return new;
@@ -111,6 +102,16 @@ pub const GC = struct {
         return self.strings.getKey(&key);
     }
 
+    pub fn pushRoot(self: *@This(), object: *Obj) Allocator.Error!void {
+        // "temp_root" uses backing instead of allocator(),
+        // to prevent the GC from recursively starting a new GC.
+        try self.temp_root.append(self.backing, object);
+    }
+
+    pub fn popRoot(self: *@This()) void {
+        _ = self.temp_root.pop();
+    }
+
     pub fn addRootMarker(self: *@This(), ptr: *anyopaque, mark_fn: MarkFn) Allocator.Error!void {
         // "markers" uses backing instead of allocator(),
         // because memory allocation can trigger a scan of markers.
@@ -122,7 +123,7 @@ pub const GC = struct {
             if (obj.is_marked) return;
 
             if (comptime config.log_gc) {
-                std.debug.print("{*} mark ", .{obj});
+                std.debug.print("0x{x} mark ", .{@intFromPtr(obj)});
                 (Value{ .obj = obj }).print();
                 std.debug.print("\n", .{});
             }
@@ -172,12 +173,16 @@ pub const GC = struct {
 
     fn blackenObject(self: *@This(), object: *Obj) void {
         if (comptime config.log_gc) {
-            std.debug.print("{*} blacken ", .{object});
+            std.debug.print("0x{x} blacken ", .{@intFromPtr(object)});
             (Value{ .obj = object }).print();
             std.debug.print("\n", .{});
         }
 
         switch (object.obj_type) {
+            .class => {
+                const class = object.as(.class);
+                self.markObject(&class.name.obj);
+            },
             .closure => {
                 const closure = object.as(.closure);
                 self.markObject(&closure.function.obj);
@@ -189,6 +194,11 @@ pub const GC = struct {
                 const function = object.as(.function);
                 if (function.name) |name| self.markObject(&name.obj);
                 self.markArray(function.chunk.constants);
+            },
+            .instance => {
+                const instance = object.as(.instance);
+                self.markObject(&instance.class.obj);
+                self.markTable(&instance.fields);
             },
             .upvalue => self.markValue(object.as(.upvalue).closed),
             .native, .string => {}, // It has no outgoing references.

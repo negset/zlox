@@ -21,24 +21,33 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
 
     const instruction: OpCode = @enumFromInt(chunk.code.items[offset]);
     const name = @tagName(instruction);
+
     return switch (instruction) {
         .constant,
         .get_global,
         .define_global,
         .set_global,
+        .get_property,
+        .set_property,
+        .class,
         => constantInstruction(name, chunk, offset),
+
         .get_local,
         .set_local,
         .get_upvalue,
         .set_upvalue,
         .call,
         => byteInstruction(name, chunk, offset),
+
         .jump,
         .jump_if_false,
         => jumpInstruction(name, true, chunk, offset),
+
         .loop,
         => jumpInstruction(name, false, chunk, offset),
-        .closure => blk: {
+
+        .closure,
+        => blk: {
             const constant = chunk.code.items[offset + 1];
             std.debug.print("{s:<16} {d:>4} ", .{ name, constant });
             const value = chunk.constants.items[constant];
@@ -62,6 +71,7 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
 
             break :blk upvalue_base + function.upvalue_count * 2;
         },
+
         else => simpleInstruction(name, offset),
     };
 }

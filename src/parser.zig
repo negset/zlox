@@ -424,6 +424,18 @@ pub const Parser = struct {
         try self.emit(.{ OpCode.call, arg_count });
     }
 
+    fn dot(self: *Parser, can_assign: bool) Error!void {
+        try self.consume(.identifier, "Expect property name after '.'.");
+        const name = try self.identifierConstant(self.previous);
+
+        if (can_assign and try self.match(.equal)) {
+            try self.expression();
+            try self.emit(.{ OpCode.set_property, name });
+        } else {
+            try self.emit(.{ OpCode.get_property, name });
+        }
+    }
+
     fn literal(self: *Parser, _: bool) Error!void {
         switch (self.previous.token_type) {
             .false => try self.emit(OpCode.false),
@@ -535,9 +547,10 @@ pub const Parser = struct {
         }
     }
 
-    pub fn getRule(token_type: TokenType) ParseRule {
+    fn getRule(token_type: TokenType) ParseRule {
         return switch (token_type) {
             .left_paren => .{ .prefix = grouping, .infix = call, .precedence = .call },
+            .dot => .{ .infix = dot, .precedence = .call },
             .minus => .{ .prefix = unary, .infix = binary, .precedence = .term },
             .plus => .{ .infix = binary, .precedence = .term },
             .slash, .star => .{ .infix = binary, .precedence = .factor },
@@ -606,6 +619,18 @@ pub const Parser = struct {
                 compiler.upvalues[i].index,
             });
         }
+    }
+
+    fn classDeclaration(self: *Parser) Error!void {
+        try self.consume(.identifier, "Expect class name.");
+        const name_constant = try self.identifierConstant(self.previous);
+        try self.declareVariable();
+
+        try self.emit(.{ OpCode.class, name_constant });
+        try self.defineVariable(name_constant);
+
+        try self.consume(.left_brace, "Expect '{' before class body.");
+        try self.consume(.right_brace, "Expect '}' after class body.");
     }
 
     fn funDeclaration(self: *Parser) Error!void {
@@ -748,7 +773,9 @@ pub const Parser = struct {
     }
 
     pub fn declaration(self: *Parser) Error!void {
-        if (try self.match(.fun)) {
+        if (try self.match(.class)) {
+            try self.classDeclaration();
+        } else if (try self.match(.fun)) {
             try self.funDeclaration();
         } else if (try self.match(.@"var")) {
             try self.varDeclaration();
