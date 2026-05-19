@@ -54,6 +54,10 @@ pub const Compiler = struct {
         };
         new.function = try ObjFunction.create(gc);
         if (function_type != .script) {
+            // To prevent GC from collecting "function", push it on root.
+            try gc.pushRoot(&new.function.?.obj);
+            defer gc.popRoot();
+
             new.function.?.name = try ObjString.createByCopy(gc, name.?);
         }
 

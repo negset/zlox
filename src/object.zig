@@ -4,6 +4,7 @@ const Chunk = @import("chunk.zig").Chunk;
 const GC = @import("memory.zig").GC;
 const Value = @import("value.zig").Value;
 const VM = @import("vm.zig").VM;
+const config = @import("config");
 
 pub const ObjType = enum {
     closure,
@@ -36,6 +37,10 @@ pub const Obj = struct {
     pub fn destroy(self: *Obj, gpa: Allocator) void {
         switch (self.obj_type) {
             inline else => |obj_type| {
+                if (comptime config.log_gc) {
+                    std.debug.print("{*} free type {}\n", .{ self, self.obj_type });
+                }
+
                 self.as(obj_type).destroy(gpa);
             },
         }
@@ -97,8 +102,7 @@ pub const ObjFunction = struct {
     }
 
     pub fn destroy(self: *@This(), gpa: Allocator) void {
-        var chunk = self.chunk;
-        chunk.deinit(gpa);
+        self.chunk.deinit(gpa);
         gpa.destroy(self);
         // Don't free "name" because GC manages it.
     }
@@ -141,7 +145,7 @@ pub const ObjString = struct {
     fn create(gc: *GC, string: []const u8, hash: u64) Allocator.Error!*@This() {
         const new = try gc.createObject(.string);
 
-        // To prevent GC from collecting new string, push it on root.
+        // To prevent GC from collecting "new", push it on root.
         try gc.pushRoot(&new.obj);
         defer gc.popRoot();
 

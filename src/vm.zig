@@ -225,12 +225,13 @@ pub const VM = struct {
         // To prevent GC from collecting a and b, use peek insted of pop.
         const b = self.peek(0).obj.as(.string).string;
         const a = self.peek(1).obj.as(.string).string;
-        defer _ = self.pop();
-        defer _ = self.pop();
 
         const string = try std.mem.concat(self.gc.allocator(), u8, &.{ a, b });
-
         const result = try ObjString.createByTake(&self.gc, string);
+
+        _ = self.pop();
+        _ = self.pop();
+
         self.push(Value{ .obj = &result.obj });
     }
 

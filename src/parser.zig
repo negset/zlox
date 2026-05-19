@@ -167,10 +167,7 @@ pub const Parser = struct {
 
     fn makeConstant(self: *Parser, value: Value) Error!u8 {
         // To prevent GC from collecting value, push it on root.
-        if (value == .obj) {
-            try self.gc.pushRoot(value.obj);
-            defer self.gc.popRoot();
-        }
+        if (value == .obj) try self.gc.pushRoot(value.obj);
 
         const index = try self.currentChunk().addConstant(self.gc.allocator(), value);
         // Make sure the chunk does not contain too many constants,
@@ -181,6 +178,9 @@ pub const Parser = struct {
                 "Too many constants in one chunk.",
             );
         };
+
+        if (value == .obj) self.gc.popRoot();
+
         return byte;
     }
 
@@ -239,10 +239,6 @@ pub const Parser = struct {
 
     fn identifierConstant(self: *Parser, name: Token) Error!u8 {
         const obj_string = try ObjString.createByCopy(self.gc, name.lexeme);
-        // To prevent GC from collecting obj_string, push it on root.
-        try self.gc.pushRoot(&obj_string.obj);
-        defer self.gc.popRoot();
-
         return self.makeConstant(.{ .obj = &obj_string.obj });
     }
 

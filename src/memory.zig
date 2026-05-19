@@ -96,10 +96,6 @@ pub const GC = struct {
         var curr = self.objects;
         var next: ?*Obj = null;
         while (curr) |obj| : (curr = next) {
-            if (comptime config.log_gc) {
-                std.debug.print("{*} free type {}\n", .{ obj, obj.obj_type });
-            }
-
             next = obj.next;
             obj.destroy(self.allocator());
         }
@@ -269,7 +265,7 @@ pub const GC = struct {
 
         const self: *@This() = @ptrCast(@alignCast(ctx));
         self.bytes_allocated += len;
-        if (comptime config.stress_gc or self.byte_allocated > self.next_gc) {
+        if ((comptime config.stress_gc) or self.bytes_allocated > self.next_gc) {
             self.collectGarbage();
         }
 
@@ -290,7 +286,7 @@ pub const GC = struct {
         const self: *@This() = @ptrCast(@alignCast(ctx));
         self.bytes_allocated += new_len - memory.len;
         if (new_len > memory.len) {
-            if (comptime config.stress_gc or self.byte_allocated > self.next_gc) {
+            if ((comptime config.stress_gc) or self.bytes_allocated > self.next_gc) {
                 self.collectGarbage();
             }
         }
@@ -304,7 +300,7 @@ pub const GC = struct {
         const self: *@This() = @ptrCast(@alignCast(ctx));
         self.bytes_allocated += new_len - memory.len;
         if (new_len > memory.len) {
-            if (comptime config.stress_gc or self.byte_allocated > self.next_gc) {
+            if ((comptime config.stress_gc) or self.bytes_allocated > self.next_gc) {
                 self.collectGarbage();
             }
         }
@@ -315,7 +311,7 @@ pub const GC = struct {
     }
 
     fn free(ctx: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
-        std.debug.print("[free] len: {}, ptr: {*}\n", .{ memory.len, memory.ptr });
+        // std.debug.print("[free] len: {}, ptr: {*}\n", .{ memory.len, memory.ptr });
 
         const self: *@This() = @ptrCast(@alignCast(ctx));
         self.bytes_allocated -= memory.len;
