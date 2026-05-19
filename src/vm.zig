@@ -108,12 +108,12 @@ pub const VM = struct {
 
     fn defineNative(self: *VM, name: []const u8, native_fn: ObjNative.NativeFn) Allocator.Error!void {
         const obj_string = try ObjString.createByCopy(&self.gc, name);
-        // To prevent GC from collecting obj_string, push it on root.
+        // To prevent GC from collecting "obj_string", push it on root.
         try self.gc.pushRoot(&obj_string.obj);
         defer _ = self.gc.popRoot();
 
         const obj_native = try ObjNative.create(&self.gc, native_fn);
-        // To prevent GC from collecting obj_native, push it on root.
+        // To prevent GC from collecting "obj_native", push it on root.
         try self.gc.pushRoot(&obj_native.obj);
         defer _ = self.gc.popRoot();
 
@@ -226,7 +226,7 @@ pub const VM = struct {
     }
 
     fn concatenate(self: *VM) Allocator.Error!void {
-        // To prevent GC from collecting a and b, use peek insted of pop.
+        // To prevent GC from collecting "a" and "b", use "peek" insted of "pop".
         const b = self.peek(0).obj.as(.string).string;
         const a = self.peek(1).obj.as(.string).string;
 
@@ -303,7 +303,7 @@ pub const VM = struct {
                 .define_global => {
                     const name = frame.readString();
                     // To prevent GC from collecting the value when calling "globals.put",
-                    // use peek instead of pop.
+                    // use "peek" instead of "pop".
                     try self.globals.put(self.gc.allocator(), name, self.peek(0));
                     _ = self.pop();
                 },
