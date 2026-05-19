@@ -35,6 +35,7 @@ pub const OpCode = enum(u8) {
     close_upvalue,
     @"return",
     class,
+    method,
 };
 
 pub const Chunk = struct {

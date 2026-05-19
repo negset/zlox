@@ -8,6 +8,7 @@ const VM = @import("vm.zig").VM;
 const config = @import("config");
 
 pub const ObjType = enum {
+    bound_method,
     class,
     closure,
     function,
@@ -18,6 +19,7 @@ pub const ObjType = enum {
 
     pub fn Impl(comptime obj_type: ObjType) type {
         return switch (obj_type) {
+            .bound_method => ObjBoundMethod,
             .class => ObjClass,
             .closure => ObjClosure,
             .function => ObjFunction,
@@ -60,17 +62,42 @@ pub const Obj = struct {
     }
 };
 
-pub const ObjClass = struct {
+pub const ObjBoundMethod = struct {
     obj: Obj,
-    name: *ObjString,
+    receiver: Value,
+    method: *ObjClosure,
 
-    pub fn create(gc: *GC, name: *ObjString) Allocator.Error!*@This() {
-        const new = try gc.createObject(.class);
-        new.name = name;
+    pub fn create(gc: *GC, receiver: Value, method: *ObjClosure) Allocator.Error!*@This() {
+        const new = try gc.createObject(.bound_method);
+        new.receiver = receiver;
+        new.method = method;
         return new;
     }
 
     pub fn destroy(self: *@This(), gpa: Allocator) void {
+        gpa.destroy(self);
+        // Don't free "receiver" and "method" because GC manages it.
+    }
+
+    pub fn print(self: *const @This()) void {
+        self.method.function.print();
+    }
+};
+
+pub const ObjClass = struct {
+    obj: Obj,
+    name: *ObjString,
+    methods: Table,
+
+    pub fn create(gc: *GC, name: *ObjString) Allocator.Error!*@This() {
+        const new = try gc.createObject(.class);
+        new.name = name;
+        new.methods = .empty;
+        return new;
+    }
+
+    pub fn destroy(self: *@This(), gpa: Allocator) void {
+        self.methods.deinit(gpa);
         gpa.destroy(self);
         // Don't free "name" because GC manages it.
     }

@@ -5,6 +5,7 @@ const Compiler = @import("compiler.zig").Compiler;
 const Parser = @import("parser.zig").Parser;
 const GC = @import("memory.zig").GC;
 const Table = @import("memory.zig").Table;
+const ObjBoundMethod = @import("object.zig").ObjBoundMethod;
 const ObjClass = @import("object.zig").ObjClass;
 const ObjClosure = @import("object.zig").ObjClosure;
 const ObjFunction = @import("object.zig").ObjFunction;
@@ -161,6 +162,11 @@ pub const VM = struct {
     fn callValue(self: *VM, callee: Value, arg_count: u8) RuntimeError!void {
         if (callee == .obj) {
             switch (callee.obj.obj_type) {
+                .bound_method => {
+                    const bound = callee.obj.as(.bound_method);
+                    try self.call(bound.method, arg_count);
+                    return;
+                },
                 .class => {
                     const class = callee.obj.as(.class);
                     const instance = try ObjInstance.create(&self.gc, class);
@@ -190,6 +196,18 @@ pub const VM = struct {
             "Can only call functions and classes.",
             .{},
         );
+    }
+
+    fn bindMethod(self: *VM, class: *ObjClass, name: *ObjString) Allocator.Error!bool {
+        if (class.methods.get(name)) |method| {
+            const closure = method.obj.as(.closure);
+            // To prevent GC from collecting receiver, use "peek" instead of "pop".
+            const bound = try ObjBoundMethod.create(&self.gc, self.peek(0), closure);
+            _ = self.pop();
+            self.push(Value{ .obj = &bound.obj });
+            return true;
+        }
+        return false;
     }
 
     fn captureUpvalue(self: *VM, local: [*]Value) Allocator.Error!*ObjUpvalue {
@@ -223,6 +241,14 @@ pub const VM = struct {
             upvalue.closed = upvalue.location[0];
             upvalue.location = @ptrCast(&upvalue.closed);
         }
+    }
+
+    fn defineMethod(self: *VM, name: *ObjString) Allocator.Error!void {
+        const method = self.peek(0);
+        const class = self.peek(1).obj.as(.class);
+        try class.methods.put(self.gc.allocator(), name, method);
+        // Pop method.
+        _ = self.pop();
     }
 
     fn concatenate(self: *VM) Allocator.Error!void {
@@ -341,7 +367,7 @@ pub const VM = struct {
                     if (instance.fields.get(name)) |value| {
                         _ = self.pop(); // Instance.
                         self.push(value);
-                    } else {
+                    } else if (!try self.bindMethod(instance.class, name)) {
                         return self.runtimeError(
                             error.InvalidOperand,
                             "Undefined property '{s}'.",
@@ -457,6 +483,9 @@ pub const VM = struct {
                     const name = frame.readString();
                     const class = try ObjClass.create(&self.gc, name);
                     self.push(Value{ .obj = &class.obj });
+                },
+                .method => {
+                    try self.defineMethod(frame.readString());
                 },
             }
         }

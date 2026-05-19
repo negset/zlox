@@ -179,9 +179,15 @@ pub const GC = struct {
         }
 
         switch (object.obj_type) {
+            .bound_method => {
+                const bound = object.as(.bound_method);
+                self.markValue(bound.receiver);
+                self.markObject(&bound.method.obj);
+            },
             .class => {
                 const class = object.as(.class);
                 self.markObject(&class.name.obj);
+                self.markTable(&class.methods);
             },
             .closure => {
                 const closure = object.as(.closure);

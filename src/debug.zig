@@ -30,6 +30,7 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         .get_property,
         .set_property,
         .class,
+        .method,
         => constantInstruction(name, chunk, offset),
 
         .get_local,

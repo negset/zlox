@@ -622,16 +622,34 @@ pub const Parser = struct {
         }
     }
 
+    fn method(self: *Parser) Error!void {
+        try self.consume(.identifier, "Expect method name.");
+        const constant = try self.identifierConstant(self.previous);
+
+        try self.function(.function);
+        try self.emit(.{ OpCode.method, constant });
+    }
+
     fn classDeclaration(self: *Parser) Error!void {
         try self.consume(.identifier, "Expect class name.");
-        const name_constant = try self.identifierConstant(self.previous);
+        const class_name = self.previous;
+        const name_constant = try self.identifierConstant(class_name);
         try self.declareVariable();
 
         try self.emit(.{ OpCode.class, name_constant });
         try self.defineVariable(name_constant);
 
+        // Push "class_name" for "OpCode.method".
+        try self.namedVariable(class_name, false);
+
         try self.consume(.left_brace, "Expect '{' before class body.");
+        while (!self.check(.right_brace) and !self.check(.eof)) {
+            try self.method();
+        }
         try self.consume(.right_brace, "Expect '}' after class body.");
+
+        // Pop "class_name".
+        try self.emit(OpCode.pop);
     }
 
     fn funDeclaration(self: *Parser) Error!void {
