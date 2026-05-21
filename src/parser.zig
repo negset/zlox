@@ -447,6 +447,9 @@ pub const Parser = struct {
         if (can_assign and self.match(.equal)) {
             try self.expression();
             try self.emit(.{ OpCode.set_property, name });
+        } else if (self.match(.left_paren)) {
+            const arg_count = try self.argumentList();
+            try self.emit(.{ OpCode.invoke, name, arg_count });
         } else {
             try self.emit(.{ OpCode.get_property, name });
         }

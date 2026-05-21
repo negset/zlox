@@ -244,7 +244,7 @@ pub const GC = struct {
         while (iter.next()) |entry| {
             const key = entry.key_ptr.*;
             if (!key.obj.is_marked) {
-                if (!table.remove(key)) @panic("Can not remove key.");
+                _ = table.remove(key);
             }
         }
     }

@@ -37,7 +37,7 @@ pub const Obj = struct {
     next: ?*Obj,
 
     pub fn as(self: *Obj, comptime obj_type: ObjType) *obj_type.Impl() {
-        if (self.obj_type != obj_type) @panic("Invalid Obj cast.");
+        std.debug.assert(self.obj_type == obj_type);
         return @ptrCast(self);
     }
 

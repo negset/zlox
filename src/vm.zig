@@ -213,6 +213,46 @@ pub const VM = struct {
         );
     }
 
+    fn invokeFromClass(
+        self: *VM,
+        class: *ObjClass,
+        name: *ObjString,
+        arg_count: u8,
+    ) RuntimeError!void {
+        if (class.methods.get(name)) |method| {
+            return self.call(method.obj.as(.closure), arg_count);
+        }
+
+        return self.runtimeError(
+            error.InvalidOperand,
+            "Undefined property '{s}'.",
+            .{name.string},
+        );
+    }
+
+    fn invoke(self: *VM, name: *ObjString, arg_count: u8) RuntimeError!void {
+        const receiver = self.peek(arg_count);
+
+        if (!receiver.isObjType(.instance)) {
+            return self.runtimeError(
+                error.InvalidOperand,
+                "Only instance have methods.",
+                .{},
+            );
+        }
+
+        const instance = receiver.obj.as(.instance);
+
+        // In case "name" is a field, not a method, assume it is a callable value.
+        if (instance.fields.get(name)) |value| {
+            const index = self.stack.items.len - arg_count - 1;
+            self.stack.items[index] = value;
+            return self.callValue(value, arg_count);
+        }
+
+        return self.invokeFromClass(instance.class, name, arg_count);
+    }
+
     fn bindMethod(self: *VM, class: *ObjClass, name: *ObjString) Allocator.Error!bool {
         if (class.methods.get(name)) |method| {
             const closure = method.obj.as(.closure);
@@ -458,6 +498,14 @@ pub const VM = struct {
                 .call => {
                     const arg_count = frame.readByte();
                     try self.callValue(self.peek(arg_count), arg_count);
+                    // Update "frame" with a new CallFrame.
+                    frame = &self.frames.items[self.frames.items.len - 1];
+                },
+                .invoke => {
+                    const method = frame.readString();
+                    const arg_count = frame.readByte();
+                    try self.invoke(method, arg_count);
+                    // Update "frame" with a new CallFrame.
                     frame = &self.frames.items[self.frames.items.len - 1];
                 },
                 .closure => {

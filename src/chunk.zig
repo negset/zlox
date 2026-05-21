@@ -31,6 +31,7 @@ pub const OpCode = enum(u8) {
     jump_if_false,
     loop,
     call,
+    invoke,
     closure,
     close_upvalue,
     @"return",

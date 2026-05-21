@@ -11,6 +11,42 @@ pub fn disassembleChunk(chunk: *const Chunk, name: []const u8) void {
     }
 }
 
+fn constantInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
+    const constant = chunk.code.items[offset + 1];
+    std.debug.print("{s:<16} {d:>4} '", .{ name, constant });
+    chunk.constants.items[constant].print();
+    std.debug.print("'\n", .{});
+    return offset + 2;
+}
+
+fn invokeInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
+    const constant = chunk.code.items[offset + 1];
+    const arg_count = chunk.code.items[offset + 2];
+    std.debug.print("{s:<16} ({} args) {d:>4} '", .{ name, arg_count, constant });
+    chunk.constants.items[constant].print();
+    std.debug.print("'\n", .{});
+    return offset + 3;
+}
+
+fn simpleInstruction(name: []const u8, offset: usize) usize {
+    std.debug.print("{s}\n", .{name});
+    return offset + 1;
+}
+
+fn byteInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
+    const slot = chunk.code.items[offset + 1];
+    std.debug.print("{s:<16} {d:>4}\n", .{ name, slot });
+    return offset + 2;
+}
+
+fn jumpInstruction(name: []const u8, comptime is_forward: bool, chunk: *const Chunk, offset: usize) usize {
+    const buf = chunk.code.items[offset + 1 ..][0..2];
+    const distance = std.mem.readInt(u16, buf, .big);
+    const dest = if (is_forward) offset + 3 + distance else offset + 3 - distance;
+    std.debug.print("{s:<16} {d:>4} -> {d}\n", .{ name, offset, dest });
+    return offset + 3;
+}
+
 pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
     std.debug.print("{d:0>4} ", .{offset});
     if (offset > 0 and chunk.lines.items[offset] == chunk.lines.items[offset - 1]) {
@@ -32,6 +68,9 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         .class,
         .method,
         => constantInstruction(name, chunk, offset),
+
+        .invoke,
+        => invokeInstruction(name, chunk, offset),
 
         .get_local,
         .set_local,
@@ -75,31 +114,4 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
 
         else => simpleInstruction(name, offset),
     };
-}
-
-fn constantInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
-    const constant = chunk.code.items[offset + 1];
-    std.debug.print("{s:<16} {d:>4} '", .{ name, constant });
-    chunk.constants.items[constant].print();
-    std.debug.print("'\n", .{});
-    return offset + 2;
-}
-
-fn simpleInstruction(name: []const u8, offset: usize) usize {
-    std.debug.print("{s}\n", .{name});
-    return offset + 1;
-}
-
-fn byteInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
-    const slot = chunk.code.items[offset + 1];
-    std.debug.print("{s:<16} {d:>4}\n", .{ name, slot });
-    return offset + 2;
-}
-
-fn jumpInstruction(name: []const u8, comptime is_forward: bool, chunk: *const Chunk, offset: usize) usize {
-    const buf = chunk.code.items[offset + 1 ..][0..2];
-    const distance = std.mem.readInt(u16, buf, .big);
-    const dest = if (is_forward) offset + 3 + distance else offset + 3 - distance;
-    std.debug.print("{s:<16} {d:>4} -> {d}\n", .{ name, offset, dest });
-    return offset + 3;
 }
