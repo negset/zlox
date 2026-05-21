@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const Compiler = @import("compiler.zig").Compiler;
+const ClassCompiler = @import("compiler.zig").ClassCompiler;
 const FunctionType = @import("compiler.zig").FunctionType;
 const GC = @import("memory.zig").GC;
 const ObjFunction = @import("object.zig").ObjFunction;
@@ -47,6 +48,7 @@ const ParseRule = struct {
 pub const Parser = struct {
     scanner: Scanner,
     compiler: ?*Compiler,
+    class_compiler: ?*ClassCompiler,
     gc: *GC,
     current: Token,
     previous: Token,
@@ -59,6 +61,7 @@ pub const Parser = struct {
     pub fn init(self: *Parser, source: []const u8, gc: *GC) Allocator.Error!void {
         self.scanner = .init(source);
         self.compiler = null;
+        self.class_compiler = null;
         self.gc = gc;
 
         try gc.addRootMarker(self, markParserRoots);
@@ -162,7 +165,12 @@ pub const Parser = struct {
     }
 
     fn emitReturn(self: *Parser) Error!void {
-        try self.emit(.{ OpCode.nil, OpCode.@"return" });
+        if (self.compiler.?.function_type == .initializer) {
+            // Return instance stored in slot zero.
+            try self.emit(.{ OpCode.get_local, @as(u8, 0), OpCode.@"return" });
+        } else {
+            try self.emit(.{ OpCode.nil, OpCode.@"return" });
+        }
     }
 
     fn makeConstant(self: *Parser, value: Value) Error!u8 {
@@ -506,6 +514,18 @@ pub const Parser = struct {
         try self.namedVariable(self.previous, can_assign);
     }
 
+    fn this(self: *Parser, _: bool) Error!void {
+        if (self.class_compiler) |_| {
+            try self.variable(false);
+            return;
+        }
+
+        return self.errorAtPrevious(
+            error.InvalidSyntax,
+            "Can't use 'this' outside of a class.",
+        );
+    }
+
     fn unary(self: *Parser, _: bool) Error!void {
         const operator_type = self.previous.token_type;
 
@@ -564,6 +584,7 @@ pub const Parser = struct {
             .@"and" => .{ .infix = @"and", .precedence = .@"and" },
             .false, .true, .nil => .{ .prefix = literal },
             .@"or" => .{ .infix = @"or", .precedence = .@"or" },
+            .this => .{ .prefix = this },
             else => .{},
         };
     }
@@ -626,7 +647,12 @@ pub const Parser = struct {
         try self.consume(.identifier, "Expect method name.");
         const constant = try self.identifierConstant(self.previous);
 
-        try self.function(.function);
+        if (self.previous.lexeme.len == 4 and std.mem.eql(u8, self.previous.lexeme, "init")) {
+            try self.function(.initializer);
+        } else {
+            try self.function(.method);
+        }
+
         try self.emit(.{ OpCode.method, constant });
     }
 
@@ -639,6 +665,9 @@ pub const Parser = struct {
         try self.emit(.{ OpCode.class, name_constant });
         try self.defineVariable(name_constant);
 
+        var target_class = ClassCompiler{ .enclosing = self.class_compiler };
+        self.class_compiler = &target_class;
+
         // Push "class_name" for "OpCode.method".
         try self.namedVariable(class_name, false);
 
@@ -650,6 +679,9 @@ pub const Parser = struct {
 
         // Pop "class_name".
         try self.emit(OpCode.pop);
+
+        // Restore enclosing.
+        self.class_compiler = self.class_compiler.?.enclosing;
     }
 
     fn funDeclaration(self: *Parser) Error!void {
@@ -768,6 +800,13 @@ pub const Parser = struct {
         if (try self.match(.semicolon)) {
             try self.emitReturn();
         } else {
+            if (self.compiler.?.function_type == .initializer) {
+                return self.errorAtPrevious(
+                    error.InvalidSyntax,
+                    "Can't return a value from an initializer.",
+                );
+            }
+
             try self.expression();
             try self.consume(.semicolon, "Expect ';' after return value.");
             try self.emit(OpCode.@"return");

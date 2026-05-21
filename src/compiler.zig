@@ -20,7 +20,13 @@ const Upvalue = struct {
 
 pub const FunctionType = enum {
     function,
+    initializer,
+    method,
     script,
+};
+
+pub const ClassCompiler = struct {
+    enclosing: ?*@This(),
 };
 
 pub const Compiler = struct {
@@ -64,7 +70,7 @@ pub const Compiler = struct {
         const local = &new.locals[new.local_count];
         local.depth = 0;
         local.is_captured = false;
-        local.name.lexeme = "";
+        local.name.lexeme = if (function_type != .function) "this" else "";
         new.local_count += 1;
 
         return new;

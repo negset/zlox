@@ -48,6 +48,7 @@ pub const VM = struct {
     frames: std.ArrayList(CallFrame),
     stack: std.ArrayList(Value),
     globals: Table,
+    init_string: *ObjString,
     open_upvalues: ?*ObjUpvalue,
 
     const RuntimeError = error{ InvalidOperand, StackOverflow } || Allocator.Error;
@@ -63,8 +64,10 @@ pub const VM = struct {
         self.frames = try .initCapacity(self.gc.allocator(), frames_max);
         self.stack = try .initCapacity(self.gc.allocator(), stack_max);
         self.globals = .empty;
+        self.init_string = try ObjString.createByCopy(&self.gc, "init");
         self.open_upvalues = null;
 
+        // Add marker after initialize VM roots.
         try self.gc.addRootMarker(self, markVMRoots);
 
         try self.defineNative("clock", clockNative);
@@ -164,6 +167,9 @@ pub const VM = struct {
             switch (callee.obj.obj_type) {
                 .bound_method => {
                     const bound = callee.obj.as(.bound_method);
+                    const index = self.stack.items.len - 1 - arg_count;
+                    // Set receiver in the slot zero of method frame.
+                    self.stack.items[index] = bound.receiver;
                     try self.call(bound.method, arg_count);
                     return;
                 },
@@ -172,6 +178,15 @@ pub const VM = struct {
                     const instance = try ObjInstance.create(&self.gc, class);
                     const index = self.stack.items.len - 1 - arg_count;
                     self.stack.items[index] = Value{ .obj = &instance.obj };
+                    if (class.methods.get(self.init_string)) |initializer| {
+                        try self.call(initializer.obj.as(.closure), arg_count);
+                    } else if (arg_count != 0) {
+                        return self.runtimeError(
+                            error.InvalidOperand,
+                            "Expected 0 arguments but got {}.",
+                            .{arg_count},
+                        );
+                    }
                     return;
                 },
                 .closure => {
@@ -524,5 +539,7 @@ pub const VM = struct {
         }
 
         gc.markTable(&self.globals);
+
+        gc.markObject(&self.init_string.obj);
     }
 };
