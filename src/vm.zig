@@ -253,16 +253,20 @@ pub const VM = struct {
         return self.invokeFromClass(instance.class, name, arg_count);
     }
 
-    fn bindMethod(self: *VM, class: *ObjClass, name: *ObjString) Allocator.Error!bool {
+    fn bindMethod(self: *VM, class: *ObjClass, name: *ObjString) RuntimeError!void {
         if (class.methods.get(name)) |method| {
             const closure = method.obj.as(.closure);
             // To prevent GC from collecting receiver, use "peek" instead of "pop".
             const bound = try ObjBoundMethod.create(&self.gc, self.peek(0), closure);
             _ = self.pop();
             self.push(Value{ .obj = &bound.obj });
-            return true;
+        } else {
+            return self.runtimeError(
+                error.InvalidOperand,
+                "Undefined property '{s}'.",
+                .{name.string},
+            );
         }
-        return false;
     }
 
     fn captureUpvalue(self: *VM, local: [*]Value) Allocator.Error!*ObjUpvalue {
@@ -407,7 +411,7 @@ pub const VM = struct {
                     const slot = frame.readByte();
                     frame.closure.upvalues[slot].?.location[0] = self.peek(0);
                 },
-                .get_property => {
+                .get_property => blk: {
                     if (!self.peek(0).isObjType(.instance)) {
                         return self.runtimeError(
                             error.InvalidOperand,
@@ -422,13 +426,10 @@ pub const VM = struct {
                     if (instance.fields.get(name)) |value| {
                         _ = self.pop(); // Instance.
                         self.push(value);
-                    } else if (!try self.bindMethod(instance.class, name)) {
-                        return self.runtimeError(
-                            error.InvalidOperand,
-                            "Undefined property '{s}'.",
-                            .{name.string},
-                        );
+                        break :blk;
                     }
+
+                    try self.bindMethod(instance.class, name);
                 },
                 .set_property => {
                     if (!self.peek(1).isObjType(.instance)) {
@@ -445,6 +446,12 @@ pub const VM = struct {
                     const value = self.pop();
                     _ = self.pop(); // Instance.
                     self.push(value);
+                },
+                .get_super => {
+                    const name = frame.readString();
+                    const superclass = self.pop().obj.as(.class);
+
+                    try self.bindMethod(superclass, name);
                 },
                 .equal => {
                     const b = self.pop();
@@ -498,14 +505,22 @@ pub const VM = struct {
                 .call => {
                     const arg_count = frame.readByte();
                     try self.callValue(self.peek(arg_count), arg_count);
-                    // Update "frame" with a new CallFrame.
+                    // Update "frame" with the newly created one.
                     frame = &self.frames.items[self.frames.items.len - 1];
                 },
                 .invoke => {
                     const method = frame.readString();
                     const arg_count = frame.readByte();
                     try self.invoke(method, arg_count);
-                    // Update "frame" with a new CallFrame.
+                    // Update "frame" with the newly created one.
+                    frame = &self.frames.items[self.frames.items.len - 1];
+                },
+                .super_invoke => {
+                    const method = frame.readString();
+                    const arg_count = frame.readByte();
+                    const superclass = self.pop().obj.as(.class);
+                    try self.invokeFromClass(superclass, method, arg_count);
+                    // Update "frame" with the newly created one.
                     frame = &self.frames.items[self.frames.items.len - 1];
                 },
                 .closure => {

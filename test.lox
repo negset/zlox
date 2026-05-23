@@ -4,25 +4,29 @@ class CoffeeMaker {
   }
 
   brew() {
-    print "Enjoy your cup of " + this.coffee;
+    if (!this.coffee) {
+      print "Nothing to brew.";
+      return;
+    }
+
+    print "Enjoy your cup of " + this.coffee + "!";
 
     // No reusing the grounds!
     this.coffee = nil;
   }
 }
 
-var maker = CoffeeMaker("coffee and chicory");
-maker.brew();
-
-class Oops {
+class EspressoMachine < CoffeeMaker {
   init() {
-    fun f() {
-      print "not a method";
-    }
+    super.init("espresso");
+  }
 
-    this.field = f;
+  brew() {
+    print "Brewing espresso...";
+    super.brew();
   }
 }
 
-var oops = Oops();
-oops.field();
+var machine = EspressoMachine();
+machine.brew();
+machine.brew();

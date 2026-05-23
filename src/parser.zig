@@ -292,6 +292,7 @@ pub const Parser = struct {
                 error.TooManyElements,
                 "Too many closure variables in function.",
             );
+            return 0;
         }
 
         compiler.upvalues[upvalue_count] = .{
@@ -325,6 +326,7 @@ pub const Parser = struct {
                 error.TooManyElements,
                 "Too many local variables in function.",
             );
+            return;
         }
 
         defer c.local_count += 1;
@@ -448,6 +450,7 @@ pub const Parser = struct {
             try self.expression();
             try self.emit(.{ OpCode.set_property, name });
         } else if (self.match(.left_paren)) {
+            // If invoke it immediately, use a super-instruction.
             const arg_count = try self.argumentList();
             try self.emit(.{ OpCode.invoke, name, arg_count });
         } else {
@@ -524,6 +527,32 @@ pub const Parser = struct {
         try self.namedVariable(self.previous, can_assign);
     }
 
+    fn super(self: *Parser, _: bool) Allocator.Error!void {
+        if (self.class_compiler == null) {
+            self.errorAtPrevious(error.InvalidSyntax, "Can't use 'super' outside of a class.");
+        } else if (!self.class_compiler.?.has_superclass) {
+            self.errorAtPrevious(error.InvalidSyntax, "Can't use 'super' in a class with no superclass.");
+        }
+
+        self.consume(.dot, "Expect '.' after 'super'.");
+        self.consume(.identifier, "Expect superclass method name.");
+        const name = try self.identifierConstant(self.previous);
+
+        // Push instance.
+        try self.namedVariable(.synthetic("this"), false);
+        if (self.match(.left_paren)) {
+            // If invoke it immediately, use a super-instruction.
+            const arg_count = try self.argumentList();
+            // Push superclass.
+            try self.namedVariable(.synthetic("super"), false);
+            try self.emit(.{ OpCode.super_invoke, name, arg_count });
+        } else {
+            // Push superclass.
+            try self.namedVariable(.synthetic("super"), false);
+            try self.emit(.{ OpCode.get_super, name });
+        }
+    }
+
     fn this(self: *Parser, _: bool) Allocator.Error!void {
         if (self.class_compiler) |_| {
             try self.variable(false);
@@ -562,6 +591,7 @@ pub const Parser = struct {
                 error.InvalidSyntax,
                 "Expect expression.",
             );
+            return;
         }
 
         while (precedence.le(getRule(self.current.token_type).precedence)) {
@@ -594,6 +624,7 @@ pub const Parser = struct {
             .@"and" => .{ .infix = @"and", .precedence = .@"and" },
             .false, .true, .nil => .{ .prefix = literal },
             .@"or" => .{ .infix = @"or", .precedence = .@"or" },
+            .super => .{ .prefix = super },
             .this => .{ .prefix = this },
             else => .{},
         };
@@ -693,7 +724,7 @@ pub const Parser = struct {
             }
 
             self.beginScope();
-            self.addLocal(Token.synthetic("super"));
+            self.addLocal(.synthetic("super"));
             try self.defineVariable(0);
 
             try self.namedVariable(class_name, false);

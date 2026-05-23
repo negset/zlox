@@ -65,11 +65,13 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         .set_global,
         .get_property,
         .set_property,
+        .get_super,
         .class,
         .method,
         => constantInstruction(name, chunk, offset),
 
         .invoke,
+        .super_invoke,
         => invokeInstruction(name, chunk, offset),
 
         .get_local,
