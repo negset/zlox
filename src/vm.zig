@@ -547,6 +547,30 @@ pub const VM = struct {
                     const class = try ObjClass.create(&self.gc, name);
                     self.push(Value{ .obj = &class.obj });
                 },
+                .inherit => {
+                    const superclass = self.peek(1);
+                    if (!superclass.isObjType(.class)) {
+                        return self.runtimeError(
+                            error.InvalidOperand,
+                            "Superclass must be a class.",
+                            .{},
+                        );
+                    }
+
+                    const subclass = self.peek(0).obj.as(.class);
+
+                    var iter = superclass.obj.as(.class).methods.iterator();
+                    while (iter.next()) |entry| {
+                        try subclass.methods.put(
+                            self.gc.allocator(),
+                            entry.key_ptr.*,
+                            entry.value_ptr.*,
+                        );
+                    }
+
+                    // Pop subclass.
+                    _ = self.pop();
+                },
                 .method => {
                     try self.defineMethod(frame.readString());
                 },

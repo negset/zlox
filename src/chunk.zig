@@ -36,6 +36,7 @@ pub const OpCode = enum(u8) {
     close_upvalue,
     @"return",
     class,
+    inherit,
     method,
 };
 

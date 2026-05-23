@@ -27,6 +27,7 @@ pub const FunctionType = enum {
 
 pub const ClassCompiler = struct {
     enclosing: ?*@This(),
+    has_superclass: bool,
 };
 
 pub const Compiler = struct {

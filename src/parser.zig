@@ -675,8 +675,31 @@ pub const Parser = struct {
         try self.emit(.{ OpCode.class, name_constant });
         try self.defineVariable(name_constant);
 
-        var target_class = ClassCompiler{ .enclosing = self.class_compiler };
+        var target_class = ClassCompiler{
+            .enclosing = self.class_compiler,
+            .has_superclass = false,
+        };
         self.class_compiler = &target_class;
+
+        if (self.match(.less)) {
+            self.consume(.identifier, "Expect superclass name.");
+            try self.variable(false);
+
+            if (class_name.identifierEquals(self.previous)) {
+                self.errorAtPrevious(
+                    error.InvalidSyntax,
+                    "A class can't inherit from itself.",
+                );
+            }
+
+            self.beginScope();
+            self.addLocal(Token.synthetic("super"));
+            try self.defineVariable(0);
+
+            try self.namedVariable(class_name, false);
+            try self.emit(OpCode.inherit);
+            self.class_compiler.?.has_superclass = true;
+        }
 
         // Push "class_name" for "OpCode.method".
         try self.namedVariable(class_name, false);
@@ -689,6 +712,10 @@ pub const Parser = struct {
 
         // Pop "class_name".
         try self.emit(OpCode.pop);
+
+        if (self.class_compiler.?.has_superclass) {
+            try self.endScope();
+        }
 
         // Restore enclosing.
         self.class_compiler = self.class_compiler.?.enclosing;

@@ -57,6 +57,14 @@ pub const Token = struct {
         if (self.lexeme.len != other.lexeme.len) return false;
         return std.mem.eql(u8, self.lexeme, other.lexeme);
     }
+
+    pub fn synthetic(comptime lexeme: []const u8) Token {
+        return .{
+            .token_type = undefined,
+            .lexeme = lexeme,
+            .line = undefined,
+        };
+    }
 };
 
 pub const Scanner = struct {
