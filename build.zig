@@ -18,12 +18,14 @@ pub fn build(b: *std.Build) void {
     const stress_gc = b.option(bool, "stress_gc", "Enable GC stress test.") orelse false;
     const log_gc = b.option(bool, "log_gc", "Enable GC logging.") orelse false;
     const debug = b.option(bool, "debug", "Enable all debug flags.") orelse false;
+    const nan_boxing = b.option(bool, "nan_boxing", "Enable NaN boxing (default: true).") orelse true;
 
     const options = b.addOptions();
     options.addOption(bool, "trace_execution", trace_execution or debug);
     options.addOption(bool, "print_code", print_code or debug);
     options.addOption(bool, "stress_gc", stress_gc or debug);
     options.addOption(bool, "log_gc", log_gc or debug);
+    options.addOption(bool, "nan_boxing", nan_boxing);
     exe.root_module.addOptions("config", options);
 
     b.installArtifact(exe);

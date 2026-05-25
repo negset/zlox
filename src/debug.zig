@@ -96,7 +96,7 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
             value.print();
             std.debug.print("\n", .{});
 
-            const function = value.obj.as(.function);
+            const function = value.toObj().as(.function);
 
             const upvalue_base = offset + 2;
             for (0..function.upvalue_count) |i| {

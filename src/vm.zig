@@ -38,7 +38,7 @@ pub const CallFrame = struct {
     }
 
     pub fn readString(self: *CallFrame) *ObjString {
-        return self.readConstant().obj.as(.string);
+        return self.readConstant().toObj().as(.string);
     }
 };
 
@@ -81,7 +81,8 @@ pub const VM = struct {
     }
 
     fn clockNative(self: *VM, _: u8, _: [*]Value) Value {
-        return Value{ .number = @floatFromInt(std.Io.Clock.real.now(self.io).toSeconds()) };
+        const timestamp = std.Io.Clock.real.now(self.io);
+        return .fromNumber(@floatFromInt(timestamp.toSeconds()));
     }
 
     fn resetStack(self: *VM) void {
@@ -124,7 +125,7 @@ pub const VM = struct {
         try self.globals.put(
             self.gc.allocator(),
             obj_string,
-            .{ .obj = &obj_native.obj },
+            .fromObj(&obj_native.obj),
         );
     }
 
@@ -163,10 +164,10 @@ pub const VM = struct {
     }
 
     fn callValue(self: *VM, callee: Value, arg_count: u8) RuntimeError!void {
-        if (callee == .obj) {
-            switch (callee.obj.obj_type) {
+        if (callee.isObj()) {
+            switch (callee.toObj().obj_type) {
                 .bound_method => {
-                    const bound = callee.obj.as(.bound_method);
+                    const bound = callee.toObj().as(.bound_method);
                     const index = self.stack.items.len - 1 - arg_count;
                     // Set receiver in the slot zero of method frame.
                     self.stack.items[index] = bound.receiver;
@@ -174,12 +175,12 @@ pub const VM = struct {
                     return;
                 },
                 .class => {
-                    const class = callee.obj.as(.class);
+                    const class = callee.toObj().as(.class);
                     const instance = try ObjInstance.create(&self.gc, class);
                     const index = self.stack.items.len - 1 - arg_count;
-                    self.stack.items[index] = Value{ .obj = &instance.obj };
+                    self.stack.items[index] = .fromObj(&instance.obj);
                     if (class.methods.get(self.init_string)) |initializer| {
-                        try self.call(initializer.obj.as(.closure), arg_count);
+                        try self.call(initializer.toObj().as(.closure), arg_count);
                     } else if (arg_count != 0) {
                         return self.runtimeError(
                             error.InvalidOperand,
@@ -190,11 +191,11 @@ pub const VM = struct {
                     return;
                 },
                 .closure => {
-                    try self.call(callee.obj.as(.closure), arg_count);
+                    try self.call(callee.toObj().as(.closure), arg_count);
                     return;
                 },
                 .native => {
-                    const native = callee.obj.as(.native);
+                    const native = callee.toObj().as(.native);
                     const args = self.stack.items.ptr + self.stack.items.len - arg_count;
                     const result = native.native_fn(self, arg_count, args);
                     // Discard args and name of native function.
@@ -220,7 +221,7 @@ pub const VM = struct {
         arg_count: u8,
     ) RuntimeError!void {
         if (class.methods.get(name)) |method| {
-            return self.call(method.obj.as(.closure), arg_count);
+            return self.call(method.toObj().as(.closure), arg_count);
         }
 
         return self.runtimeError(
@@ -241,7 +242,7 @@ pub const VM = struct {
             );
         }
 
-        const instance = receiver.obj.as(.instance);
+        const instance = receiver.toObj().as(.instance);
 
         // In case "name" is a field, not a method, assume it is a callable value.
         if (instance.fields.get(name)) |value| {
@@ -255,11 +256,11 @@ pub const VM = struct {
 
     fn bindMethod(self: *VM, class: *ObjClass, name: *ObjString) RuntimeError!void {
         if (class.methods.get(name)) |method| {
-            const closure = method.obj.as(.closure);
+            const closure = method.toObj().as(.closure);
             // To prevent GC from collecting receiver, use "peek" instead of "pop".
             const bound = try ObjBoundMethod.create(&self.gc, self.peek(0), closure);
             _ = self.pop();
-            self.push(Value{ .obj = &bound.obj });
+            self.push(.fromObj(&bound.obj));
         } else {
             return self.runtimeError(
                 error.InvalidOperand,
@@ -304,7 +305,7 @@ pub const VM = struct {
 
     fn defineMethod(self: *VM, name: *ObjString) Allocator.Error!void {
         const method = self.peek(0);
-        const class = self.peek(1).obj.as(.class);
+        const class = self.peek(1).toObj().as(.class);
         try class.methods.put(self.gc.allocator(), name, method);
         // Pop method.
         _ = self.pop();
@@ -312,8 +313,8 @@ pub const VM = struct {
 
     fn concatenate(self: *VM) Allocator.Error!void {
         // To prevent GC from collecting "a" and "b", use "peek" insted of "pop".
-        const b = self.peek(0).obj.as(.string).string;
-        const a = self.peek(1).obj.as(.string).string;
+        const b = self.peek(0).toObj().as(.string).string;
+        const a = self.peek(1).toObj().as(.string).string;
 
         const string = try std.mem.concat(self.gc.allocator(), u8, &.{ a, b });
         const result = try ObjString.createByTake(&self.gc, string);
@@ -321,27 +322,27 @@ pub const VM = struct {
         _ = self.pop();
         _ = self.pop();
 
-        self.push(Value{ .obj = &result.obj });
+        self.push(.fromObj(&result.obj));
     }
 
     fn binaryOp(self: *VM, comptime instruction: OpCode) RuntimeError!void {
-        if (self.peek(0) != .number or self.peek(1) != .number) {
+        if (!self.peek(0).isNumber() or !self.peek(1).isNumber()) {
             return self.runtimeError(
                 error.InvalidOperand,
                 "Operands must be numbers.",
                 .{},
             );
         }
-        const b = self.pop().number;
-        const a = self.pop().number;
+        const b = self.pop().toNumber();
+        const a = self.pop().toNumber();
 
         self.push(switch (comptime instruction) {
-            .add => .{ .number = a + b },
-            .subtract => .{ .number = a - b },
-            .multiply => .{ .number = a * b },
-            .divide => .{ .number = a / b },
-            .greater => .{ .bool = a > b },
-            .less => .{ .bool = a < b },
+            .add => .fromNumber(a + b),
+            .subtract => .fromNumber(a - b),
+            .multiply => .fromNumber(a * b),
+            .divide => .fromNumber(a / b),
+            .greater => .fromBool(a > b),
+            .less => .fromBool(a < b),
             else => unreachable,
         });
     }
@@ -363,9 +364,9 @@ pub const VM = struct {
 
             switch (@as(OpCode, @enumFromInt(frame.readByte()))) {
                 .constant => self.push(frame.readConstant()),
-                .nil => self.push(.{ .nil = {} }),
-                .true => self.push(.{ .bool = true }),
-                .false => self.push(.{ .bool = false }),
+                .nil => self.push(.nil),
+                .true => self.push(.true),
+                .false => self.push(.false),
                 .pop => _ = self.pop(),
                 .get_local => {
                     const slot = frame.readByte();
@@ -420,7 +421,7 @@ pub const VM = struct {
                         );
                     }
 
-                    const instance = self.peek(0).obj.as(.instance);
+                    const instance = self.peek(0).toObj().as(.instance);
                     const name = frame.readString();
 
                     if (instance.fields.get(name)) |value| {
@@ -440,7 +441,7 @@ pub const VM = struct {
                         );
                     }
 
-                    const instance = self.peek(1).obj.as(.instance);
+                    const instance = self.peek(1).toObj().as(.instance);
                     const obj_string = frame.readString();
                     try instance.fields.put(self.gc.allocator(), obj_string, self.peek(0));
                     const value = self.pop();
@@ -449,14 +450,14 @@ pub const VM = struct {
                 },
                 .get_super => {
                     const name = frame.readString();
-                    const superclass = self.pop().obj.as(.class);
+                    const superclass = self.pop().toObj().as(.class);
 
                     try self.bindMethod(superclass, name);
                 },
                 .equal => {
                     const b = self.pop();
                     const a = self.pop();
-                    self.push(.{ .bool = a.equals(b) });
+                    self.push(.fromBool(a.equals(b)));
                 },
                 inline .greater,
                 .less,
@@ -467,7 +468,7 @@ pub const VM = struct {
                 .add => {
                     if (self.peek(0).isObjType(.string) and self.peek(1).isObjType(.string)) {
                         try self.concatenate();
-                    } else if (self.peek(0) == .number and self.peek(1) == .number) {
+                    } else if (self.peek(0).isNumber() and self.peek(1).isNumber()) {
                         try self.binaryOp(.add);
                     } else {
                         return self.runtimeError(
@@ -477,14 +478,17 @@ pub const VM = struct {
                         );
                     }
                 },
-                .not => self.push(.{ .bool = self.pop().isFalsey() }),
-                .negate => switch (self.peek(0)) {
-                    .number => self.push(.{ .number = -(self.pop().number) }),
-                    else => return self.runtimeError(
-                        error.InvalidOperand,
-                        "Operand must be a number.",
-                        .{},
-                    ),
+                .not => self.push(.fromBool(self.pop().isFalsey())),
+                .negate => {
+                    if (self.peek(0).isNumber()) {
+                        self.push(.fromNumber(-self.pop().toNumber()));
+                    } else {
+                        return self.runtimeError(
+                            error.InvalidOperand,
+                            "Operand must be a number.",
+                            .{},
+                        );
+                    }
                 },
                 .print => {
                     self.pop().print();
@@ -518,15 +522,15 @@ pub const VM = struct {
                 .super_invoke => {
                     const method = frame.readString();
                     const arg_count = frame.readByte();
-                    const superclass = self.pop().obj.as(.class);
+                    const superclass = self.pop().toObj().as(.class);
                     try self.invokeFromClass(superclass, method, arg_count);
                     // Update "frame" with the newly created one.
                     frame = &self.frames.items[self.frames.items.len - 1];
                 },
                 .closure => {
-                    const function = frame.readConstant().obj.as(.function);
+                    const function = frame.readConstant().toObj().as(.function);
                     const closure = try ObjClosure.create(&self.gc, function);
-                    self.push(.{ .obj = &closure.obj });
+                    self.push(.fromObj(&closure.obj));
                     for (0..closure.upvalues.len) |i| {
                         const is_local = frame.readByte();
                         const index = frame.readByte();
@@ -560,7 +564,7 @@ pub const VM = struct {
                 .class => {
                     const name = frame.readString();
                     const class = try ObjClass.create(&self.gc, name);
-                    self.push(Value{ .obj = &class.obj });
+                    self.push(.fromObj(&class.obj));
                 },
                 .inherit => {
                     const superclass = self.peek(1);
@@ -572,9 +576,9 @@ pub const VM = struct {
                         );
                     }
 
-                    const subclass = self.peek(0).obj.as(.class);
+                    const subclass = self.peek(0).toObj().as(.class);
 
-                    var iter = superclass.obj.as(.class).methods.iterator();
+                    var iter = superclass.toObj().as(.class).methods.iterator();
                     while (iter.next()) |entry| {
                         try subclass.methods.put(
                             self.gc.allocator(),
@@ -603,7 +607,7 @@ pub const VM = struct {
         defer self.gc.popRoot();
 
         const closure = try ObjClosure.create(&self.gc, function);
-        self.push(Value{ .obj = &closure.obj });
+        self.push(.fromObj(&closure.obj));
         try self.call(closure, 0);
 
         try self.run();

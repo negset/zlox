@@ -124,7 +124,7 @@ pub const GC = struct {
 
             if (comptime config.log_gc) {
                 std.debug.print("0x{x} mark ", .{@intFromPtr(obj)});
-                (Value{ .obj = obj }).print();
+                obj.print();
                 std.debug.print("\n", .{});
             }
 
@@ -137,7 +137,7 @@ pub const GC = struct {
     }
 
     pub fn markValue(self: *@This(), value: Value) void {
-        if (value == .obj) self.markObject(value.obj);
+        if (value.isObj()) self.markObject(value.toObj());
     }
 
     pub fn markArray(self: *@This(), array: std.ArrayList(Value)) void {
@@ -174,7 +174,7 @@ pub const GC = struct {
     fn blackenObject(self: *@This(), object: *Obj) void {
         if (comptime config.log_gc) {
             std.debug.print("0x{x} blacken ", .{@intFromPtr(object)});
-            (Value{ .obj = object }).print();
+            object.print();
             std.debug.print("\n", .{});
         }
 

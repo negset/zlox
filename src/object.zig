@@ -226,7 +226,7 @@ pub const ObjString = struct {
 
         new.string = string;
         new.hash = hash;
-        try gc.strings.put(gc.allocator(), new, Value{ .nil = {} });
+        try gc.strings.put(gc.allocator(), new, .nil);
         return new;
     }
 
@@ -280,7 +280,7 @@ pub const ObjUpvalue = struct {
 
     pub fn create(gc: *GC, slot: [*]Value) Allocator.Error!*@This() {
         const new = try gc.createObject(.upvalue);
-        new.closed = .{ .nil = {} };
+        new.closed = .nil;
         new.location = slot;
         new.next = null;
         return new;

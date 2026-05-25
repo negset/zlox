@@ -183,9 +183,9 @@ pub const Parser = struct {
 
     fn makeConstant(self: *Parser, value: Value) Allocator.Error!u8 {
         // To prevent GC from collecting "value", push it on root.
-        if (value == .obj) try self.gc.pushRoot(value.obj);
+        if (value.isObj()) try self.gc.pushRoot(value.toObj());
         defer {
-            if (value == .obj) self.gc.popRoot();
+            if (value.isObj()) self.gc.popRoot();
         }
 
         const index = try self.currentChunk().addConstant(self.gc.allocator(), value);
@@ -255,7 +255,7 @@ pub const Parser = struct {
 
     fn identifierConstant(self: *Parser, name: Token) Allocator.Error!u8 {
         const obj_string = try ObjString.createByCopy(self.gc, name.lexeme);
-        return self.makeConstant(.{ .obj = &obj_string.obj });
+        return self.makeConstant(.fromObj(&obj_string.obj));
     }
 
     fn resolveLocal(self: *Parser, compiler: *Compiler, name: Token) ?u8 {
@@ -475,7 +475,7 @@ pub const Parser = struct {
     fn number(self: *Parser, _: bool) Allocator.Error!void {
         const value = std.fmt.parseFloat(f64, self.previous.lexeme) catch
             @panic("Invalid number.");
-        try self.emitConstant(.{ .number = value });
+        try self.emitConstant(.fromNumber(value));
     }
 
     fn @"or"(self: *Parser, _: bool) Allocator.Error!void {
@@ -494,7 +494,7 @@ pub const Parser = struct {
         // Trim double quotes.
         const str = self.previous.lexeme[1 .. self.previous.lexeme.len - 1];
         const obj_string = try ObjString.createByCopy(self.gc, str);
-        try self.emitConstant(.{ .obj = &obj_string.obj });
+        try self.emitConstant(.fromObj(&obj_string.obj));
     }
 
     fn namedVariable(self: *Parser, name: Token, can_assign: bool) Allocator.Error!void {
@@ -672,7 +672,7 @@ pub const Parser = struct {
         try self.block();
 
         const obj_function = try self.endCompiler();
-        const constant = try self.makeConstant(.{ .obj = &obj_function.obj });
+        const constant = try self.makeConstant(.fromObj(&obj_function.obj));
         try self.emit(.{ OpCode.closure, constant });
 
         // OpCode.closure has a variably sized encoding.
