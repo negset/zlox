@@ -226,7 +226,7 @@ pub const ObjString = struct {
 
         new.string = string;
         new.hash = hash;
-        try gc.strings.put(gc.allocator(), new, .nil);
+        try gc.strings.put(gc.allocator(), new, .nil_value);
         return new;
     }
 
@@ -280,7 +280,7 @@ pub const ObjUpvalue = struct {
 
     pub fn create(gc: *GC, slot: [*]Value) Allocator.Error!*@This() {
         const new = try gc.createObject(.upvalue);
-        new.closed = .nil;
+        new.closed = .nil_value;
         new.location = slot;
         new.next = null;
         return new;
@@ -292,6 +292,7 @@ pub const ObjUpvalue = struct {
 
     pub fn print(_: *const @This()) void {
         // Users can't print upvalues since they are not first-class values.
-        unreachable;
+        // Called during GC logging.
+        std.debug.print("upvalue", .{});
     }
 };

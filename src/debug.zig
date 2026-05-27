@@ -1,6 +1,7 @@
 const std = @import("std");
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
+const Obj = @import("object.zig").Obj;
 
 pub fn disassembleChunk(chunk: *const Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
@@ -96,7 +97,7 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
             value.print();
             std.debug.print("\n", .{});
 
-            const function = value.toObj().as(.function);
+            const function = value.as(*Obj).as(.function);
 
             const upvalue_base = offset + 2;
             for (0..function.upvalue_count) |i| {

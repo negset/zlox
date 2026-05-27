@@ -5,13 +5,8 @@ const config = @import("config");
 
 pub const Value = if (config.nan_boxing) ValueU64 else ValueTaggedUnion;
 
-comptime {
-    // TODO: check
-    std.debug.assert(@sizeOf(ValueU64) == @sizeOf(u64));
-}
-
 const ValueU64 = struct {
-    value: u64,
+    bin: u64,
 
     const sign_bit: u64 = 0x8000_0000_0000_0000;
 
@@ -25,79 +20,67 @@ const ValueU64 = struct {
     const tag_false = 0b10;
     const tag_true = 0b11;
 
-    pub const nil: @This() = .{ .value = qnan | tag_nil };
-    pub const @"false": @This() = .{ .value = qnan | tag_false };
-    pub const @"true": @This() = .{ .value = qnan | tag_true };
+    pub const nil_value: @This() = .{ .bin = qnan | tag_nil };
+    pub const false_value: @This() = .{ .bin = qnan | tag_false };
+    pub const true_value: @This() = .{ .bin = qnan | tag_true };
 
-    pub fn fromNumber(num: f64) @This() {
-        return .{ .value = @intFromFloat(num) };
+    pub fn init(value: anytype) @This() {
+        const T = @TypeOf(value);
+        return switch (T) {
+            f64 => .{ .bin = @bitCast(value) },
+            bool => if (value) true_value else false_value,
+            *Obj => .{ .bin = sign_bit | qnan | @intFromPtr(value) },
+            else => @compileError("Unsupported type: " ++ @typeName(T)),
+        };
     }
 
-    pub fn toNumber(self: @This()) f64 {
-        return @floatFromInt(self.value);
+    pub fn as(self: @This(), comptime T: type) T {
+        return switch (T) {
+            f64 => @bitCast(self.bin),
+            bool => self.bin == true_value.bin,
+            *Obj => @ptrFromInt(self.bin & ~(sign_bit | qnan)),
+            else => @compileError("Unsupported type: " ++ @typeName(T)),
+        };
     }
 
-    pub fn isNumber(self: @This()) bool {
-        return (self.value & qnan) != qnan;
-    }
-
-    pub fn isNil(self: @This()) bool {
-        return self.value == nil.value;
-    }
-
-    pub fn fromBool(b: bool) @This() {
-        return if (b) @"true" else @"false";
-    }
-
-    pub fn toBool(self: @This()) bool {
-        return self.value == @"true".value;
-    }
-
-    pub fn isBool(self: @This()) bool {
-        // Bitwise OR with 1 converts false to true.
-        return self.value | 1 == @"true".value;
-    }
-
-    pub fn fromObj(obj: *Obj) @This() {
-        return .{ .value = sign_bit | qnan | @as(u64, @intFromPtr(obj)) };
-    }
-
-    pub fn toObj(self: @This()) *Obj {
-        return @ptrFromInt(self.value & ~(sign_bit | qnan));
-    }
-
-    pub fn isObj(self: @This()) bool {
-        return self.value & (qnan | sign_bit) == qnan | sign_bit;
+    pub fn is(self: @This(), comptime T: type) bool {
+        return switch (T) {
+            f64 => (self.bin & qnan) != qnan,
+            void => self.bin == nil_value.bin,
+            bool => self.bin | 1 == true_value.bin, // Normalize to true using bitwise OR with 1.
+            *Obj => self.bin & (qnan | sign_bit) == qnan | sign_bit,
+            else => @compileError("Unsupported type: " ++ @typeName(T)),
+        };
     }
 
     pub fn print(self: @This()) void {
-        if (self.isBool()) {
-            std.debug.print("{}", .{self.toBool()});
-        } else if (self.isNil()) {
+        if (self.is(bool)) {
+            std.debug.print("{}", .{self.as(bool)});
+        } else if (self.is(void)) {
             std.debug.print("nil", .{});
-        } else if (self.isNumber()) {
-            std.debug.print("{}", .{self.toNumber()});
-        } else if (self.isObj()) {
-            @as(*Obj, @ptrFromInt(self.value)).print();
+        } else if (self.is(f64)) {
+            std.debug.print("{}", .{self.as(f64)});
+        } else if (self.is(*Obj)) {
+            self.as(*Obj).print();
         }
     }
 
     pub fn equals(self: @This(), other: @This()) bool {
         // Numbers are compared as numbers, in compliance with
         // the IEEE 754 rule that NaN values are not equal to themselves.
-        if (self.isNumber() and other.isNumber()) {
-            return self.toNumber() == other.toNumber();
+        if (self.is(f64) and other.is(f64)) {
+            return self.as(f64) == other.as(f64);
         }
-        return self.value == other.value;
+        return self.bin == other.bin;
     }
 
-    pub fn isFalsey(self: Value) bool {
-        return self.isNil() or self.isBool() and !self.toBool();
+    pub fn isFalsey(self: @This()) bool {
+        return self.is(void) or self.is(bool) and !self.as(bool);
     }
 
-    pub fn isObjType(self: Value, obj_type: ObjType) bool {
-        return if (self.isObj())
-            self.toObj().obj_type == obj_type
+    pub fn isObjType(self: @This(), obj_type: ObjType) bool {
+        return if (self.is(*Obj))
+            self.as(*Obj).obj_type == obj_type
         else
             false;
     }
@@ -109,7 +92,40 @@ const ValueTaggedUnion = union(enum) {
     number: f64,
     obj: *Obj,
 
-    pub fn print(self: Value) void {
+    pub const nil_value: @This() = .{ .nil = {} };
+    pub const false_value: @This() = .{ .bool = false };
+    pub const true_value: @This() = .{ .bool = true };
+
+    pub fn init(value: anytype) @This() {
+        const T = @TypeOf(value);
+        return switch (T) {
+            f64 => .{ .number = value },
+            bool => .{ .bool = value },
+            *Obj => .{ .obj = value },
+            else => @compileError("Unsupported type: " ++ @typeName(T)),
+        };
+    }
+
+    pub fn as(self: @This(), comptime T: type) T {
+        return switch (T) {
+            f64 => self.number,
+            bool => self.bool,
+            *Obj => self.obj,
+            else => @compileError("Unsupported type: " ++ @typeName(T)),
+        };
+    }
+
+    pub fn is(self: @This(), comptime T: type) bool {
+        return switch (T) {
+            f64 => self == .number,
+            void => self == .nil,
+            bool => self == .bool,
+            *Obj => self == .obj,
+            else => @compileError("Unsupported type: " ++ @typeName(T)),
+        };
+    }
+
+    pub fn print(self: @This()) void {
         switch (self) {
             .number => |f| std.debug.print("{}", .{f}),
             .nil => std.debug.print("nil", .{}),
@@ -118,21 +134,21 @@ const ValueTaggedUnion = union(enum) {
         }
     }
 
-    pub fn equals(self: Value, other: Value) bool {
+    pub fn equals(self: @This(), other: @This()) bool {
         if (std.meta.activeTag(self) != std.meta.activeTag(other)) return false;
         return switch (self) {
+            .number => |f| f == other.number,
             .bool => |b| b == other.bool,
             .nil => true,
-            .number => |f| f == other.number,
             .obj => |o| o == other.obj,
         };
     }
 
-    pub fn isFalsey(self: Value) bool {
-        return self == .nil or (self == .bool and !self.bool);
+    pub fn isFalsey(self: @This()) bool {
+        return self == .nil or self == .bool and !self.bool;
     }
 
-    pub fn isObjType(self: Value, obj_type: ObjType) bool {
+    pub fn isObjType(self: @This(), obj_type: ObjType) bool {
         return switch (self) {
             .obj => |obj| obj.obj_type == obj_type,
             else => false,

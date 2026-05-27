@@ -137,7 +137,7 @@ pub const GC = struct {
     }
 
     pub fn markValue(self: *@This(), value: Value) void {
-        if (value.isObj()) self.markObject(value.toObj());
+        if (value.is(*Obj)) self.markObject(value.as(*Obj));
     }
 
     pub fn markArray(self: *@This(), array: std.ArrayList(Value)) void {
