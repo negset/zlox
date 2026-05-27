@@ -67,3 +67,16 @@ pub fn main(init: std.process.Init) !void {
         },
     }
 }
+
+test {
+    // Reference other tests in the root file.
+    _ = @import("chunk.zig");
+    _ = @import("compiler.zig");
+    _ = @import("debug.zig");
+    _ = @import("memory.zig");
+    _ = @import("object.zig");
+    _ = @import("parser.zig");
+    _ = @import("scanner.zig");
+    _ = @import("value.zig");
+    _ = @import("vm.zig");
+}
