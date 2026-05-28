@@ -1,6 +1,9 @@
 const std = @import("std");
+const Build = std.Build;
+const Module = Build.Module;
+const Options = Build.Step.Options;
 
-fn options(b: *std.Build) *std.Build.Step.Options {
+fn options(b: *Build) *Options {
     const trace_execution = b.option(bool, "trace_execution", "Enable execution trace.") orelse false;
     const print_code = b.option(bool, "print_code", "Enable code print.") orelse false;
     const stress_gc = b.option(bool, "stress_gc", "Enable GC stress test.") orelse false;
@@ -17,7 +20,7 @@ fn options(b: *std.Build) *std.Build.Step.Options {
     return opts;
 }
 
-fn buildExe(b: *std.Build, root_module: *std.Build.Module) void {
+fn buildExe(b: *Build, root_module: *Module) void {
     const exe = b.addExecutable(.{
         .name = "zlox",
         .root_module = root_module,
@@ -35,7 +38,7 @@ fn buildExe(b: *std.Build, root_module: *std.Build.Module) void {
     }
 }
 
-fn buildTest(b: *std.Build, root_module: *std.Build.Module) void {
+fn buildTest(b: *Build, root_module: *Module) void {
     const tests = b.addTest(.{
         .name = "zlox-test",
         .root_module = root_module,
@@ -46,7 +49,7 @@ fn buildTest(b: *std.Build, root_module: *std.Build.Module) void {
     test_step.dependOn(&run_tests.step);
 }
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *Build) void {
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = b.standardTargetOptions(.{}),

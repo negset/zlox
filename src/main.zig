@@ -69,7 +69,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
-    // Reference other tests in the root file.
+    // Refer other tests in the root file.
     _ = @import("chunk.zig");
     _ = @import("compiler.zig");
     _ = @import("debug.zig");
