@@ -50,6 +50,8 @@ pub const GC = struct {
     }
 
     pub fn deinit(self: *@This()) void {
+        std.debug.assert(self.temp_root.items.len == 0);
+
         self.freeObjects();
         self.strings.deinit(self.allocator());
         self.markers.deinit(self.backing);
