@@ -296,3 +296,34 @@ pub const ObjUpvalue = struct {
         std.debug.print("upvalue", .{});
     }
 };
+
+test "ObjString interning" {
+    const gpa = std.testing.allocator;
+    var gc = GC.init(gpa);
+    defer gc.deinit();
+
+    const s1 = try ObjString.createByCopy(&gc, "foo");
+    try gc.pushRoot(&s1.obj);
+    defer gc.popRoot();
+    const s2 = try ObjString.createByCopy(&gc, "foo");
+
+    try std.testing.expectEqual(s1, s2);
+}
+
+test "ObjString.Context" {
+    const gpa = std.testing.allocator;
+    var gc = GC.init(gpa);
+    defer gc.deinit();
+
+    const s1 = try ObjString.createByCopy(&gc, "foo");
+    try gc.pushRoot(&s1.obj);
+    defer gc.popRoot();
+    const s2 = try ObjString.createByCopy(&gc, "foo");
+    try gc.pushRoot(&s2.obj);
+    defer gc.popRoot();
+    const s3 = try ObjString.createByCopy(&gc, "bar");
+    const ctx = ObjString.Context{};
+
+    try std.testing.expect(ctx.eql(s1, s2));
+    try std.testing.expect(!ctx.eql(s1, s3));
+}

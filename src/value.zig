@@ -155,3 +155,69 @@ const ValueTaggedUnion = union(enum) {
         };
     }
 };
+
+test "struct size" {
+    // "ValueU64" should be same size as u64.
+    try std.testing.expectEqual(@sizeOf(ValueU64), @sizeOf(u64));
+    // Due to alignment, "ValueTaggedUnion" should to be twice the payload size.
+    try std.testing.expectEqual(@sizeOf(ValueTaggedUnion), @sizeOf(f64) * 2);
+}
+
+test "NaN behavior" {
+    inline for (.{ ValueU64, ValueTaggedUnion }) |T| {
+        const v1 = T.init(std.math.nan(f64));
+        const v2 = T.init(std.math.nan(f64));
+
+        // NaN != NaN.
+        try std.testing.expect(!v1.equals(v2));
+
+        // is(f64) should still be true for NaN.
+        try std.testing.expect(v1.is(f64));
+    }
+}
+
+test "isFalsey" {
+    inline for (.{ ValueU64, ValueTaggedUnion }) |T| {
+        try std.testing.expect(T.nil_value.isFalsey());
+        try std.testing.expect(T.false_value.isFalsey());
+        try std.testing.expect(!T.true_value.isFalsey());
+
+        const v = T.init(@as(f64, 0));
+        try std.testing.expect(!v.isFalsey());
+    }
+}
+
+test "basic conversions" {
+    inline for (.{ ValueU64, ValueTaggedUnion }) |T| {
+        var v: T = undefined;
+
+        const f: f64 = 0;
+        v = .init(f);
+        try std.testing.expect(v.is(f64));
+        try std.testing.expectEqual(f, v.as(f64));
+
+        const b = true;
+        v = .init(b);
+        try std.testing.expect(v.is(bool));
+        try std.testing.expectEqual(b, v.as(bool));
+
+        v = .nil_value;
+        try std.testing.expect(v.is(void));
+    }
+}
+
+test "object conversions" {
+    const gpa = std.testing.allocator;
+
+    const obj = try gpa.create(Obj);
+    defer gpa.destroy(obj);
+
+    obj.obj_type = .string;
+
+    inline for (.{ ValueU64, ValueTaggedUnion }) |T| {
+        const v = T.init(obj);
+        try std.testing.expect(v.is(*Obj));
+        try std.testing.expect(v.as(*Obj) == obj);
+        try std.testing.expect(v.isObjType(obj.obj_type));
+    }
+}
