@@ -1,9 +1,10 @@
 const std = @import("std");
 const Build = std.Build;
-const Module = Build.Module;
 const Options = Build.Step.Options;
+const OptimizeMode = std.builtin.OptimizeMode;
+const ResolvedTarget = Build.ResolvedTarget;
 
-fn options(b: *Build) *Options {
+fn createOptions(b: *Build) *Options {
     const trace_execution = b.option(bool, "trace_execution", "Enable execution trace.") orelse false;
     const print_code = b.option(bool, "print_code", "Enable code print.") orelse false;
     const stress_gc = b.option(bool, "stress_gc", "Enable GC stress test.") orelse false;
@@ -20,11 +21,16 @@ fn options(b: *Build) *Options {
     return opts;
 }
 
-fn buildExe(b: *Build, root_module: *Module) void {
+fn buildExe(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Options) void {
     const exe = b.addExecutable(.{
         .name = "zlox",
-        .root_module = root_module,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
+    exe.root_module.addOptions("config", opts);
     b.installArtifact(exe);
 
     const run_exe = b.addRunArtifact(exe);
@@ -38,25 +44,51 @@ fn buildExe(b: *Build, root_module: *Module) void {
     }
 }
 
-fn buildTest(b: *Build, root_module: *Module) void {
+fn buildTest(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Options) void {
     const tests = b.addTest(.{
         .name = "zlox-test",
-        .root_module = root_module,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
+    tests.root_module.addOptions("config", opts);
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
 }
 
-pub fn build(b: *Build) void {
-    const root_module = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = b.standardTargetOptions(.{}),
-        .optimize = b.standardOptimizeOption(.{}),
+fn buildWasm(b: *Build, opts: *Options) void {
+    const wasm = b.addExecutable(.{
+        .name = "zlox",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/wasm.zig"),
+            .target = b.resolveTargetQuery(.{
+                .cpu_arch = .wasm32,
+                .os_tag = .freestanding,
+            }),
+            .optimize = .ReleaseSmall,
+        }),
     });
-    root_module.addOptions("config", options(b));
+    wasm.root_module.addOptions("config", opts);
 
-    buildExe(b, root_module);
-    buildTest(b, root_module);
+    wasm.entry = .disabled;
+    wasm.rdynamic = true;
+    wasm.import_memory = true;
+
+    const install_wasm = b.addInstallArtifact(wasm, .{});
+    const wasm_step = b.step("wasm", "Build WASM module");
+    wasm_step.dependOn(&install_wasm.step);
+}
+
+pub fn build(b: *Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    const opts = createOptions(b);
+
+    buildExe(b, target, optimize, opts);
+    buildTest(b, target, optimize, opts);
+    buildWasm(b, opts);
 }
