@@ -279,17 +279,14 @@ pub const GC = struct {
         alignment: Alignment,
         ret_addr: usize,
     ) ?[*]u8 {
-        // std.debug.print("[alloc] len: {}\n", .{len});
-
         const self: *@This() = @ptrCast(@alignCast(ctx));
+
         self.bytes_allocated += len;
         if ((comptime config.stress_gc) or self.bytes_allocated > self.next_gc) {
             self.collectGarbage();
         }
 
-        const ptr = self.backing.rawAlloc(len, alignment, ret_addr) orelse return null;
-
-        return ptr;
+        return self.backing.rawAlloc(len, alignment, ret_addr);
     }
 
     fn resize(
@@ -299,9 +296,8 @@ pub const GC = struct {
         new_len: usize,
         ret_addr: usize,
     ) bool {
-        // std.debug.print("[resize] len: {} -> {}, ptr: {*}\n", .{ memory.len, new_len, memory.ptr });
-
         const self: *@This() = @ptrCast(@alignCast(ctx));
+
         self.bytes_allocated += new_len - memory.len;
         if (new_len > memory.len) {
             if ((comptime config.stress_gc) or self.bytes_allocated > self.next_gc) {
@@ -313,9 +309,8 @@ pub const GC = struct {
     }
 
     fn remap(ctx: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-        // std.debug.print("[remap] len: {} -> {}, ptr: {*}\n", .{ memory.len, new_len, memory.ptr });
-
         const self: *@This() = @ptrCast(@alignCast(ctx));
+
         self.bytes_allocated += new_len - memory.len;
         if (new_len > memory.len) {
             if ((comptime config.stress_gc) or self.bytes_allocated > self.next_gc) {
@@ -323,15 +318,12 @@ pub const GC = struct {
             }
         }
 
-        const ptr = self.backing.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
-
-        return ptr;
+        return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
     }
 
     fn free(ctx: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
-        // std.debug.print("[free] len: {}, ptr: {*}\n", .{ memory.len, memory.ptr });
-
         const self: *@This() = @ptrCast(@alignCast(ctx));
+
         self.bytes_allocated -= memory.len;
 
         self.backing.rawFree(memory, alignment, ret_addr);
