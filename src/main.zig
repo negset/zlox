@@ -1,9 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const GC = @import("memory.zig").GC;
+const Value = @import("value.zig").Value;
 const Natives = @import("vm.zig").Natives;
 const VM = @import("vm.zig").VM;
-const Value = @import("value.zig").Value;
 
 fn repl(io: std.Io, vm: *VM) void {
     var buf: [1024]u8 = undefined;
@@ -43,7 +43,7 @@ fn runFile(gpa: Allocator, io: std.Io, vm: *VM, path: []const u8) void {
     };
     defer gpa.free(source);
 
-    vm.interpret(source) catch |err| switch (err) {
+    vm.interpret(source) catch |e| switch (e) {
         error.InvalidSyntax,
         error.TooManyElements,
         error.InvalidOperand,
@@ -62,15 +62,15 @@ const MainNatives = struct {
         return .{
             .ptr = self,
             .vtable = &.{
-                .clock = clock,
+                .now = now,
             },
         };
     }
 
-    fn clock(vm: *VM, _: u8, _: [*]Value) Value {
+    fn now(vm: *VM, _: u8, _: [*]Value) Value {
         const self: *@This() = @ptrCast(@alignCast(vm.natives.ptr));
         const clk = std.Io.Clock.real;
-        const timestamp: f64 = @floatFromInt(clk.now(self.io).toSeconds());
+        const timestamp: f64 = @floatFromInt(clk.now(self.io).toMilliseconds());
         return .init(timestamp);
     }
 };

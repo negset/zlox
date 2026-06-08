@@ -60,7 +60,7 @@ fn buildTest(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *O
     test_step.dependOn(&run_tests.step);
 }
 
-fn buildWasm(b: *Build, opts: *Options) void {
+fn buildWasm(b: *Build) void {
     const wasm = b.addExecutable(.{
         .name = "zlox",
         .root_module = b.createModule(.{
@@ -72,6 +72,15 @@ fn buildWasm(b: *Build, opts: *Options) void {
             .optimize = .ReleaseSmall,
         }),
     });
+
+    const opts = b.addOptions();
+    opts.addOption(bool, "trace_execution", false);
+    opts.addOption(bool, "print_code", false);
+    opts.addOption(bool, "stress_gc", false);
+    opts.addOption(bool, "log_gc", false);
+    // Disable nan boxing, since it requires 64-bit memory.
+    opts.addOption(bool, "nan_boxing", false);
+
     wasm.root_module.addOptions("config", opts);
 
     wasm.entry = .disabled;
@@ -79,7 +88,7 @@ fn buildWasm(b: *Build, opts: *Options) void {
     wasm.import_memory = true;
 
     const install_wasm = b.addInstallArtifact(wasm, .{});
-    const wasm_step = b.step("wasm", "Build WASM module");
+    const wasm_step = b.step("wasm", "Build Wasm module");
     wasm_step.dependOn(&install_wasm.step);
 }
 
@@ -90,5 +99,5 @@ pub fn build(b: *Build) void {
 
     buildExe(b, target, optimize, opts);
     buildTest(b, target, optimize, opts);
-    buildWasm(b, opts);
+    buildWasm(b);
 }

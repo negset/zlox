@@ -39,7 +39,7 @@ pub const Obj = struct {
 
     pub fn as(self: *Obj, comptime obj_type: ObjType) *obj_type.Impl() {
         std.debug.assert(self.obj_type == obj_type);
-        return @ptrCast(self);
+        return @ptrCast(@alignCast(self));
     }
 
     pub fn destroy(self: *Obj, gpa: Allocator) void {
