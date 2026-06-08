@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Writer = std.Io.Writer;
 const OpCode = @import("chunk.zig").OpCode;
 const Compiler = @import("compiler.zig").Compiler;
 const Parser = @import("parser.zig").Parser;
@@ -45,6 +46,8 @@ pub const CallFrame = struct {
 
 pub const VM = struct {
     gc: GC,
+    out: *Writer,
+    err: *Writer,
     io: std.Io,
     frames: std.ArrayList(CallFrame),
     stack: std.ArrayList(Value),
@@ -52,14 +55,19 @@ pub const VM = struct {
     init_string: *ObjString,
     open_upvalues: ?*ObjUpvalue,
 
-    const RuntimeError = error{ InvalidOperand, StackOverflow } || Allocator.Error;
+    const RuntimeError = error{
+        InvalidOperand,
+        StackOverflow,
+    } || Allocator.Error || Writer.Error;
     const Error = RuntimeError || Parser.Error;
 
     const frames_max = 64;
     const stack_max = frames_max * Compiler.u8_count;
 
-    pub fn init(self: *VM, gpa: Allocator, io: std.Io) Allocator.Error!void {
+    pub fn init(self: *VM, gpa: Allocator, out: *Writer, err: *Writer, io: std.Io) Error!void {
         self.gc = GC.init(gpa);
+        self.out = out;
+        self.err = err;
         self.io = io;
 
         self.frames = try .initCapacity(self.gc.allocator(), frames_max);
@@ -93,26 +101,28 @@ pub const VM = struct {
     }
 
     fn runtimeError(self: *VM, err: RuntimeError, comptime fmt: []const u8, args: anytype) RuntimeError {
-        std.debug.print("{s} (runtime): ", .{@errorName(err)});
-        std.debug.print(fmt ++ "\n", args);
+        try self.err.print("{s} (runtime): ", .{@errorName(err)});
+        try self.err.print(fmt ++ "\n", args);
 
         for (0..self.frames.items.len) |i| {
             const frame = &self.frames.items[self.frames.items.len - i - 1];
             const function = frame.closure.function;
             const instruction = frame.ip - 1;
-            std.debug.print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
+            try self.err.print("[line {d}] in ", .{function.chunk.lines.items[instruction]});
             if (function.name) |name| {
-                std.debug.print("{s}()\n", .{name.string});
+                try self.err.print("{s}()\n", .{name.string});
             } else {
-                std.debug.print("script\n", .{});
+                try self.err.print("script\n", .{});
             }
         }
+
+        try self.err.flush();
 
         self.resetStack();
         return err;
     }
 
-    fn defineNative(self: *VM, name: []const u8, native_fn: ObjNative.NativeFn) Allocator.Error!void {
+    pub fn defineNative(self: *VM, name: []const u8, native_fn: ObjNative.NativeFn) Error!void {
         const obj_string = try ObjString.createByCopy(&self.gc, name);
         // To prevent GC from collecting "obj_string", push it on root.
         try self.gc.pushRoot(&obj_string.obj);
@@ -272,7 +282,7 @@ pub const VM = struct {
         }
     }
 
-    fn captureUpvalue(self: *VM, local: [*]Value) Allocator.Error!*ObjUpvalue {
+    fn captureUpvalue(self: *VM, local: [*]Value) Error!*ObjUpvalue {
         var previous: ?*ObjUpvalue = null;
         var current: ?*ObjUpvalue = self.open_upvalues;
 
@@ -305,7 +315,7 @@ pub const VM = struct {
         }
     }
 
-    fn defineMethod(self: *VM, name: *ObjString) Allocator.Error!void {
+    fn defineMethod(self: *VM, name: *ObjString) Error!void {
         const method = self.peek(0);
         const class = self.peek(1).as(*Obj).as(.class);
         try class.methods.put(self.gc.allocator(), name, method);
@@ -313,7 +323,7 @@ pub const VM = struct {
         _ = self.pop();
     }
 
-    fn concatenate(self: *VM) Allocator.Error!void {
+    fn concatenate(self: *VM) Error!void {
         // To prevent GC from collecting "a" and "b", use "peek" insted of "pop".
         const b = self.peek(0).as(*Obj).as(.string).string;
         const a = self.peek(1).as(*Obj).as(.string).string;
@@ -493,8 +503,9 @@ pub const VM = struct {
                     }
                 },
                 .print => {
-                    self.pop().print();
-                    std.debug.print("\n", .{});
+                    try self.pop().print(self.out);
+                    try self.out.print("\n", .{});
+                    try self.out.flush();
                 },
                 .jump => {
                     const distance = frame.readShort();
@@ -601,7 +612,7 @@ pub const VM = struct {
 
     pub fn interpret(self: *VM, source: []const u8) Error!void {
         var parser: Parser = undefined;
-        try parser.init(source, &self.gc);
+        try parser.init(source, &self.gc, self.err);
         const function = try parser.run();
 
         // To prevent GC from collecting "function", push it on root.

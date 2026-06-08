@@ -1,4 +1,5 @@
 const std = @import("std");
+const Writer = std.Io.Writer;
 const Obj = @import("object.zig").Obj;
 const ObjType = @import("object.zig").ObjType;
 const config = @import("config");
@@ -53,15 +54,15 @@ const ValueU64 = struct {
         };
     }
 
-    pub fn print(self: @This()) void {
+    pub fn print(self: @This(), w: *Writer) Writer.Error!void {
         if (self.is(bool)) {
-            std.debug.print("{}", .{self.as(bool)});
+            try w.print("{}", .{self.as(bool)});
         } else if (self.is(void)) {
-            std.debug.print("nil", .{});
+            try w.print("nil", .{});
         } else if (self.is(f64)) {
-            std.debug.print("{}", .{self.as(f64)});
+            try w.print("{}", .{self.as(f64)});
         } else if (self.is(*Obj)) {
-            self.as(*Obj).print();
+            try self.as(*Obj).print(w);
         }
     }
 
@@ -125,12 +126,12 @@ const ValueTaggedUnion = union(enum) {
         };
     }
 
-    pub fn print(self: @This()) void {
+    pub fn print(self: @This(), w: *Writer) Writer.Error!void {
         switch (self) {
-            .number => |f| std.debug.print("{}", .{f}),
-            .nil => std.debug.print("nil", .{}),
-            .bool => |b| std.debug.print("{}", .{b}),
-            .obj => |o| o.print(),
+            .number => |f| try w.print("{}", .{f}),
+            .nil => try w.print("nil", .{}),
+            .bool => |b| try w.print("{}", .{b}),
+            .obj => |o| try o.print(w),
         }
     }
 

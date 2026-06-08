@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Writer = std.Io.Writer;
 const Chunk = @import("chunk.zig").Chunk;
 const GC = @import("memory.zig").GC;
 const Table = @import("memory.zig").Table;
@@ -53,10 +54,10 @@ pub const Obj = struct {
         }
     }
 
-    pub fn print(self: *Obj) void {
+    pub fn print(self: *Obj, w: *Writer) Writer.Error!void {
         switch (self.obj_type) {
             inline else => |obj_type| {
-                self.as(obj_type).print();
+                try self.as(obj_type).print(w);
             },
         }
     }
@@ -79,8 +80,8 @@ pub const ObjBoundMethod = struct {
         // Don't free "receiver" and "method" because GC manages it.
     }
 
-    pub fn print(self: *const @This()) void {
-        self.method.function.print();
+    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
+        try self.method.function.print(w);
     }
 };
 
@@ -102,8 +103,8 @@ pub const ObjClass = struct {
         // Don't free "name" because GC manages it.
     }
 
-    pub fn print(self: *const @This()) void {
-        std.debug.print("{s}", .{self.name.string});
+    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
+        try w.print("{s}", .{self.name.string});
     }
 };
 
@@ -131,8 +132,8 @@ pub const ObjClosure = struct {
         // Don't free "function" because closure does'nt own it.
     }
 
-    pub fn print(self: *const @This()) void {
-        self.function.print();
+    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
+        try self.function.print(w);
     }
 };
 
@@ -159,11 +160,11 @@ pub const ObjFunction = struct {
         // Don't free "name" because GC manages it.
     }
 
-    pub fn print(self: *const @This()) void {
+    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
         if (self.name) |name| {
-            std.debug.print("<fn {s}>", .{name.string});
+            try w.print("<fn {s}>", .{name.string});
         } else {
-            std.debug.print("<script>", .{});
+            try w.print("<script>", .{});
         }
     }
 };
@@ -186,8 +187,8 @@ pub const ObjInstance = struct {
         gpa.destroy(self);
     }
 
-    pub fn print(self: *const @This()) void {
-        std.debug.print("{s} instance", .{self.class.name.string});
+    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
+        try w.print("{s} instance", .{self.class.name.string});
     }
 };
 
@@ -207,8 +208,8 @@ pub const ObjNative = struct {
         gpa.destroy(self);
     }
 
-    pub fn print(_: *const @This()) void {
-        std.debug.print("<native fn>", .{});
+    pub fn print(_: *const @This(), w: *Writer) Writer.Error!void {
+        try w.print("<native fn>", .{});
     }
 };
 
@@ -255,8 +256,8 @@ pub const ObjString = struct {
         gpa.destroy(self);
     }
 
-    pub fn print(self: *const @This()) void {
-        std.debug.print("{s}", .{self.string});
+    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
+        try w.print("{s}", .{self.string});
     }
 
     pub const Context = struct {
@@ -290,10 +291,10 @@ pub const ObjUpvalue = struct {
         gpa.destroy(self);
     }
 
-    pub fn print(_: *const @This()) void {
+    pub fn print(_: *const @This(), w: *Writer) Writer.Error!void {
         // Users can't print upvalues since they are not first-class values.
         // Called during GC logging.
-        std.debug.print("upvalue", .{});
+        try w.print("upvalue", .{});
     }
 };
 
