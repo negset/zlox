@@ -9,21 +9,24 @@ const allocator = std.heap.wasm_allocator;
 const WasmWriter = struct {
     interface: Writer,
 
-    pub fn init(buffer: []u8) @This() {
+    pub fn init(_: []u8) @This() {
         return .{
             .interface = .{
                 .vtable = &.{ .drain = drain },
-                .buffer = buffer,
+                .buffer = &.{},
             },
         };
     }
 
     fn drain(w: *Writer, data: []const []const u8, _: usize) Writer.Error!usize {
+        if (data.len == 0) return 0;
+
         if (w.end > 0) {
             const buffered = w.buffered();
             js_out(buffered.ptr, buffered.len);
             w.end = 0;
         }
+
         const bytes_to_write = data[0];
         js_out(bytes_to_write.ptr, bytes_to_write.len);
         return bytes_to_write.len;

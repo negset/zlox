@@ -1,9 +1,8 @@
 "use strict";
 
 function js_out(ptr, len) {
-  console.log(`[JSDEBUG] js_out | ptr: ${ptr}, len: ${len}`);
   const bytes = new Uint8Array(memory.buffer, ptr, len);
-  console.log(decoder.decode(bytes));
+  document.querySelector("#output").value += decoder.decode(bytes);
 }
 
 function js_now() {
@@ -16,7 +15,7 @@ async function initWasm() {
   const module = new WebAssembly.Module(bytes);
   const memory = new WebAssembly.Memory({
     initial: 20,
-    maximum: 2000,
+    maximum: 65536,
   });
   const instance = new WebAssembly.Instance(module, {
     env: { memory, js_out, js_now },
@@ -46,9 +45,10 @@ const decoder = new TextDecoder();
 const { wasm, memory } = await initWasm();
 
 document.querySelector("#run").addEventListener("click", () => {
-  const input = document.querySelector("#input").textContent;
+  document.querySelector("#output").value = "";
+
+  const input = document.querySelector("#input").value;
   const source = allocateString(input);
   const result = wasm.runSource(source.ptr, source.len);
-  console.log(`result: ${result}`);
   wasm.free(source.ptr, source.len);
 });
