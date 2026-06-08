@@ -1,9 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const GC = @import("memory.zig").GC;
+const Natives = @import("vm.zig").Natives;
 const VM = @import("vm.zig").VM;
-
-const NativeFn = @import("object.zig").ObjNative.NativeFn;
 const Value = @import("value.zig").Value;
 
 fn repl(io: std.Io, vm: *VM) void {
@@ -56,11 +55,25 @@ fn runFile(gpa: Allocator, io: std.Io, vm: *VM, path: []const u8) void {
     };
 }
 
-fn clockNative(_: *VM, _: u8, _: [*]Value) Value {
-    const clock = std.Io.Clock.real;
-    const timestamp: f64 = @floatFromInt(clock.now(io).toSeconds());
-    return .init(timestamp);
-}
+const MainNatives = struct {
+    io: std.Io,
+
+    pub fn natives(self: *@This()) Natives {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .clock = clock,
+            },
+        };
+    }
+
+    fn clock(vm: *VM, _: u8, _: [*]Value) Value {
+        const self: *@This() = @ptrCast(@alignCast(vm.natives.ptr));
+        const clk = std.Io.Clock.real;
+        const timestamp: f64 = @floatFromInt(clk.now(self.io).toSeconds());
+        return .init(timestamp);
+    }
+};
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
@@ -73,11 +86,11 @@ pub fn main(init: std.process.Init) !void {
     var err_fwriter = std.Io.File.stderr().writer(init.io, &err_buf);
     const err = &err_fwriter.interface;
 
-    var vm: VM = undefined;
-    try vm.init(init.gpa, out, err, init.io);
-    defer vm.deinit();
+    var natives = MainNatives{ .io = init.io };
 
-    vm.defineNative("clock", nativeFunctions(init.io));
+    var vm: VM = undefined;
+    try vm.init(init.gpa, out, err, natives.natives());
+    defer vm.deinit();
 
     switch (args.len) {
         1 => repl(init.io, &vm),

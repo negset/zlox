@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const allocator = std.heap.wasm_allocator;
 
 extern fn js_out(ptr: [*]const u8, len: usize) void;

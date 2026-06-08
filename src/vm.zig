@@ -13,6 +13,7 @@ const ObjClosure = @import("object.zig").ObjClosure;
 const ObjFunction = @import("object.zig").ObjFunction;
 const ObjInstance = @import("object.zig").ObjInstance;
 const ObjNative = @import("object.zig").ObjNative;
+const NativeFn = ObjNative.NativeFn;
 const ObjString = @import("object.zig").ObjString;
 const ObjUpvalue = @import("object.zig").ObjUpvalue;
 const Value = @import("value.zig").Value;
@@ -44,11 +45,20 @@ pub const CallFrame = struct {
     }
 };
 
+pub const Natives = struct {
+    ptr: *anyopaque,
+    vtable: *const VTable,
+
+    pub const VTable = struct {
+        clock: NativeFn,
+    };
+};
+
 pub const VM = struct {
     gc: GC,
     out: *Writer,
     err: *Writer,
-    io: std.Io,
+    natives: Natives,
     frames: std.ArrayList(CallFrame),
     stack: std.ArrayList(Value),
     globals: Table,
@@ -59,16 +69,16 @@ pub const VM = struct {
         InvalidOperand,
         StackOverflow,
     } || Allocator.Error || Writer.Error;
-    const Error = RuntimeError || Parser.Error;
+    const Error = Parser.Error || RuntimeError;
 
     const frames_max = 64;
     const stack_max = frames_max * Compiler.u8_count;
 
-    pub fn init(self: *VM, gpa: Allocator, out: *Writer, err: *Writer, io: std.Io) Error!void {
+    pub fn init(self: *VM, gpa: Allocator, out: *Writer, err: *Writer, natives: Natives) RuntimeError!void {
         self.gc = GC.init(gpa);
         self.out = out;
         self.err = err;
-        self.io = io;
+        self.natives = natives;
 
         self.frames = try .initCapacity(self.gc.allocator(), frames_max);
         self.stack = try .initCapacity(self.gc.allocator(), stack_max);
@@ -79,7 +89,12 @@ pub const VM = struct {
         // Add marker after initialize VM roots.
         try self.gc.addRootMarker(self, markVMRoots);
 
-        try self.defineNative("clock", clockNative);
+        inline for (std.meta.fields(Natives.VTable)) |field| {
+            try self.defineNative(
+                field.name,
+                @field(natives.vtable, field.name),
+            );
+        }
     }
 
     pub fn deinit(self: *VM) void {
@@ -87,11 +102,6 @@ pub const VM = struct {
         self.stack.deinit(self.gc.allocator());
         self.globals.deinit(self.gc.allocator());
         self.gc.deinit();
-    }
-
-    fn clockNative(self: *VM, _: u8, _: [*]Value) Value {
-        const timestamp: f64 = @floatFromInt(std.Io.Clock.real.now(self.io).toSeconds());
-        return .init(timestamp);
     }
 
     fn resetStack(self: *VM) void {
@@ -122,7 +132,7 @@ pub const VM = struct {
         return err;
     }
 
-    pub fn defineNative(self: *VM, name: []const u8, native_fn: ObjNative.NativeFn) Error!void {
+    pub fn defineNative(self: *VM, name: []const u8, native_fn: NativeFn) RuntimeError!void {
         const obj_string = try ObjString.createByCopy(&self.gc, name);
         // To prevent GC from collecting "obj_string", push it on root.
         try self.gc.pushRoot(&obj_string.obj);
@@ -282,7 +292,7 @@ pub const VM = struct {
         }
     }
 
-    fn captureUpvalue(self: *VM, local: [*]Value) Error!*ObjUpvalue {
+    fn captureUpvalue(self: *VM, local: [*]Value) RuntimeError!*ObjUpvalue {
         var previous: ?*ObjUpvalue = null;
         var current: ?*ObjUpvalue = self.open_upvalues;
 
@@ -315,7 +325,7 @@ pub const VM = struct {
         }
     }
 
-    fn defineMethod(self: *VM, name: *ObjString) Error!void {
+    fn defineMethod(self: *VM, name: *ObjString) RuntimeError!void {
         const method = self.peek(0);
         const class = self.peek(1).as(*Obj).as(.class);
         try class.methods.put(self.gc.allocator(), name, method);
@@ -323,7 +333,7 @@ pub const VM = struct {
         _ = self.pop();
     }
 
-    fn concatenate(self: *VM) Error!void {
+    fn concatenate(self: *VM) RuntimeError!void {
         // To prevent GC from collecting "a" and "b", use "peek" insted of "pop".
         const b = self.peek(0).as(*Obj).as(.string).string;
         const a = self.peek(1).as(*Obj).as(.string).string;
