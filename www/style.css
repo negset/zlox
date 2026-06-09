@@ -1,0 +1,83 @@
+body {
+  font-family: "Firple", "FiraCode", monospace;
+  color: #ccc;
+  background-color: #234;
+  margin: 16px 24px;
+  max-width: 960px;
+}
+
+header {
+  display: flex;
+}
+
+h1 {
+  display: inline-block;
+}
+
+button#run {
+  font-family: "Firple", "FiraCode", monospace;
+  width: 128px;
+  height: 48px;
+  margin: auto 0 auto auto;
+}
+
+textarea {
+  width: 100%;
+  color: #ccc;
+  background-color: #123;
+  padding: 16px 24px;
+  box-sizing: border-box;
+}
+
+/*--------------------------------------*/
+
+.input-container {
+  position: relative;
+  width: 100%;
+  height: 300px;
+  font-family: "Firple", "FiraCode", monospace;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+/* textarea と pre/code の共通スタイル（完全に一致させる） */
+.input-container textarea,
+.input-container pre {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 10px;
+  box-sizing: border-box;
+  border: 1px solid #ccc;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-y: auto;
+}
+
+/* 1. 重なり順：textareaを上にする */
+.input-container textarea {
+  z-index: 2;
+  background: transparent; /* 背景を透明にして下のハイライトを透かす */
+  color: transparent; /* 文字も透明にする（文字の重複・ズレを防ぐ） */
+  caret-color: #000; /* カーソル（キャレット）だけは見せる */
+  resize: none;
+}
+
+/* 2. 重なり順：pre（ハイライト側）を下にする */
+.input-container pre {
+  z-index: 1;
+  background: #f5f2f0; /* Prismのデフォルト背景色に合わせる */
+  pointer-events: none; /* 下にあるpreへのクリック判定を無効化 */
+}
+
+/* Prism.jsが当てるcodeタグの不要な余白などをリセット */
+.input-container code {
+  font-family: inherit !important;
+  font-size: inherit !important;
+}

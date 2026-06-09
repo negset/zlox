@@ -1,13 +1,41 @@
 <!doctype html>
 <html>
-  <body>
+  <head>
+    <link rel="stylesheet" href="style.css" />
     <script type="module" src="script.js"></script>
-    <div>
-      <textarea id="input" rows="10" cols="50"></textarea>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.30.0/themes/prism-tomorrow.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.30.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.30.0/components/prism-clike.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Zlox Playground</h1>
+      <button id="run">Run (Ctrl+Enter)</button>
+    </header>
+    <div class="input-container">
+      <textarea
+        id="input"
+        rows="22"
+        cols="50"
+        placeholder="Type Lox code here..."
+        spellcheck="false"
+      ></textarea>
+      <pre id="highlight" aria-hidden="true">
+        <code class="language-clike"></code>
+      </pre>
     </div>
-    <button id="run">Run</button>
     <div>
-      <textarea id="output" rows="10" cols="50" readonly></textarea>
+      <textarea
+        id="output"
+        rows="8"
+        cols="50"
+        placeholder="Output"
+        spellcheck="false"
+        readonly
+      ></textarea>
     </div>
   </body>
 </html>
