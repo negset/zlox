@@ -60,7 +60,7 @@ fn buildTest(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *O
     test_step.dependOn(&run_tests.step);
 }
 
-fn buildWasm(b: *Build) void {
+fn buildWasm(b: *Build, optimize: OptimizeMode) void {
     const wasm = b.addExecutable(.{
         .name = "zlox",
         .root_module = b.createModule(.{
@@ -69,7 +69,7 @@ fn buildWasm(b: *Build) void {
                 .cpu_arch = .wasm32,
                 .os_tag = .freestanding,
             }),
-            .optimize = .Debug,
+            .optimize = optimize,
         }),
     });
 
@@ -99,5 +99,5 @@ pub fn build(b: *Build) void {
 
     buildExe(b, target, optimize, opts);
     buildTest(b, target, optimize, opts);
-    buildWasm(b);
+    buildWasm(b, optimize);
 }
