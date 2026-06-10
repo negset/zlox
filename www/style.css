@@ -1,5 +1,8 @@
+:root {
+  --font-monospace: "Firple", "Cascadia Code", monospace;
+}
+
 body {
-  font-family: "Firple", "FiraCode", monospace;
   color: #ccc;
   background-color: #234;
   margin: 16px 24px;
@@ -11,73 +14,91 @@ header {
 }
 
 h1 {
+  font-family: var(--font-monospace);
   display: inline-block;
 }
 
-button#run {
-  font-family: "Firple", "FiraCode", monospace;
-  width: 128px;
-  height: 48px;
+.right-aligned {
+  display: inline-block;
   margin: auto 0 auto auto;
 }
 
-textarea {
-  width: 100%;
-  color: #ccc;
-  background-color: #123;
-  padding: 16px 24px;
-  box-sizing: border-box;
+#samples {
+  margin-right: 24px;
 }
 
-/*--------------------------------------*/
+#run {
+  font-family: var(--font-monospace);
+  width: 128px;
+  height: 48px;
+}
 
-.input-container {
-  position: relative;
+pre,
+textarea {
   width: 100%;
-  height: 300px;
-  font-family: "Firple", "FiraCode", monospace;
+  height: 100%;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: #ccc;
+  background-color: #2d2d2d;
+  border: 1px solid #888;
+  margin: 0;
+  padding: 16px 24px;
+  box-sizing: border-box;
+  resize: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-y: auto;
+  tab-size: 4;
+}
+
+pre#output .err {
+  color: #f77;
+}
+
+#output-container {
+  width: 100%;
+  height: 144px;
+  margin: 16px 0;
+  font-family: var(--font-monospace);
   font-size: 16px;
   line-height: 1.5;
 }
 
-/* textarea と pre/code の共通スタイル（完全に一致させる） */
-.input-container textarea,
-.input-container pre {
+#input-container {
+  position: relative;
+  width: 100%;
+  height: 400px;
+  margin: 16px 0;
+  font-family: var(--font-monospace);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+#input-container textarea#input,
+#input-container pre#highlight {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 10px;
-  box-sizing: border-box;
-  border: 1px solid #ccc;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-y: auto;
+  padding: 16px 24px 16px 3.8em;
 }
 
-/* 1. 重なり順：textareaを上にする */
-.input-container textarea {
+#input-container textarea#input {
   z-index: 2;
-  background: transparent; /* 背景を透明にして下のハイライトを透かす */
-  color: transparent; /* 文字も透明にする（文字の重複・ズレを防ぐ） */
-  caret-color: #000; /* カーソル（キャレット）だけは見せる */
-  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: #fff;
 }
 
-/* 2. 重なり順：pre（ハイライト側）を下にする */
-.input-container pre {
+#input-container pre#highlight {
   z-index: 1;
-  background: #f5f2f0; /* Prismのデフォルト背景色に合わせる */
-  pointer-events: none; /* 下にあるpreへのクリック判定を無効化 */
+  pointer-events: none;
 }
 
-/* Prism.jsが当てるcodeタグの不要な余白などをリセット */
-.input-container code {
-  font-family: inherit !important;
-  font-size: inherit !important;
+#input-container code[class*="language-"],
+#input-container pre[class*="language-"] {
+  /* Prevent Prism.js from overwriting them. */
+  font-family: var(--font-monospace);
+  margin: 0;
 }

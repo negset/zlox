@@ -8,27 +8,31 @@ const allocator = std.heap.wasm_allocator;
 
 const WasmWriter = struct {
     interface: Writer,
+    is_err: bool,
 
-    pub fn init(_: []u8) @This() {
+    pub fn init(_: []u8, is_err: bool) @This() {
         return .{
             .interface = .{
                 .vtable = &.{ .drain = drain },
                 .buffer = &.{},
             },
+            .is_err = is_err,
         };
     }
 
     fn drain(w: *Writer, data: []const []const u8, _: usize) Writer.Error!usize {
+        const self: *@This() = @fieldParentPtr("interface", w);
+
         if (data.len == 0) return 0;
 
         if (w.end > 0) {
             const buffered = w.buffered();
-            js_out(buffered.ptr, buffered.len);
+            js_write(buffered.ptr, buffered.len, self.is_err);
             w.end = 0;
         }
 
         const bytes_to_write = data[0];
-        js_out(bytes_to_write.ptr, bytes_to_write.len);
+        js_write(bytes_to_write.ptr, bytes_to_write.len, self.is_err);
         return bytes_to_write.len;
     }
 };
@@ -49,7 +53,7 @@ const WasmNatives = struct {
 };
 
 extern fn js_now() f64;
-extern fn js_out(ptr: [*]const u8, len: usize) void;
+extern fn js_write(ptr: [*]const u8, len: usize, is_err: bool) void;
 
 export fn alloc(len: usize) ?[*]const u8 {
     const mem = allocator.alloc(u8, len) catch return null;
@@ -62,18 +66,18 @@ export fn free(ptr: [*]const u8, len: usize) void {
 
 export fn runSource(ptr: [*]const u8, len: usize) i64 {
     var out_buf: [1024]u8 = undefined;
-    var out_writer = WasmWriter.init(&out_buf);
+    var out_writer = WasmWriter.init(&out_buf, false);
     const out = &out_writer.interface;
 
     var err_buf: [1024]u8 = undefined;
-    var err_writer = WasmWriter.init(&err_buf);
+    var err_writer = WasmWriter.init(&err_buf, true);
     const err = &err_writer.interface;
 
     var natives = WasmNatives{};
 
     var vm: VM = undefined;
     vm.init(allocator, out, err, natives.natives()) catch {
-        err.print("Can't init VM.\n", .{}) catch {};
+        err.print("Can't initialize VM.\n", .{}) catch {};
         return 70;
     };
     defer vm.deinit();

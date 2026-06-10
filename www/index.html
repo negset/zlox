@@ -1,41 +1,47 @@
 <!doctype html>
 <html>
   <head>
+    <title>Zlox Playground</title>
     <link rel="stylesheet" href="style.css" />
     <script type="module" src="script.js"></script>
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.30.0/themes/prism-tomorrow.min.css"
     />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.30.0/plugins/line-numbers/prism-line-numbers.min.css"
+    />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.30.0/components/prism-core.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.30.0/components/prism-clike.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.30.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
   </head>
   <body>
     <header>
       <h1>Zlox Playground</h1>
-      <button id="run">Run (Ctrl+Enter)</button>
+      <div class="right-aligned">
+        <select id="samples">
+          <option value="helloworld">helloworld</option>
+          <option value="helloworld">class</option>
+        </select>
+        <button id="run">Run (Ctrl+Enter)</button>
+      </div>
     </header>
-    <div class="input-container">
+    <div id="input-container">
       <textarea
         id="input"
-        rows="22"
         cols="50"
         placeholder="Type Lox code here..."
         spellcheck="false"
       ></textarea>
-      <pre id="highlight" aria-hidden="true">
-        <code class="language-clike"></code>
-      </pre>
+      <pre
+        id="highlight"
+        class="line-numbers"
+        aria-hidden="true"
+      ><code class="language-clike"></code></pre>
     </div>
-    <div>
-      <textarea
-        id="output"
-        rows="8"
-        cols="50"
-        placeholder="Output"
-        spellcheck="false"
-        readonly
-      ></textarea>
+    <div id="output-container">
+      <pre id="output"></pre>
     </div>
   </body>
 </html>
