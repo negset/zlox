@@ -10,20 +10,20 @@ const WasmWriter = struct {
     interface: Writer,
     is_err: bool,
 
-    pub fn init(_: []u8, is_err: bool) @This() {
+    pub fn init(buffer: []u8, is_err: bool) @This() {
         return .{
             .interface = .{
                 .vtable = &.{ .drain = drain },
-                .buffer = &.{},
+                .buffer = buffer,
             },
             .is_err = is_err,
         };
     }
 
-    fn drain(w: *Writer, data: []const []const u8, _: usize) Writer.Error!usize {
-        const self: *@This() = @fieldParentPtr("interface", w);
-
+    fn drain(w: *Writer, data: []const []const u8, splat: usize) Writer.Error!usize {
         if (data.len == 0) return 0;
+
+        const self: *@This() = @fieldParentPtr("interface", w);
 
         if (w.end > 0) {
             const buffered = w.buffered();
@@ -31,9 +31,20 @@ const WasmWriter = struct {
             w.end = 0;
         }
 
-        const bytes_to_write = data[0];
-        js_write(bytes_to_write.ptr, bytes_to_write.len, self.is_err);
-        return bytes_to_write.len;
+        var total_consumed: usize = 0;
+
+        for (data[0 .. data.len - 1]) |slice| {
+            js_write(slice.ptr, slice.len, self.is_err);
+            total_consumed += slice.len;
+        }
+
+        const last = data[data.len - 1];
+        for (0..splat) |_| {
+            js_write(last.ptr, last.len, self.is_err);
+        }
+        total_consumed += last.len * splat;
+
+        return total_consumed;
     }
 };
 
