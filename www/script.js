@@ -1,63 +1,28 @@
-function js_write(ptr, len, is_err) {
-  const bytes = new Uint8Array(memory.buffer, ptr, len);
-  const text = decoder.decode(bytes);
-  const html = `<span class="${is_err ? "err" : "out"}">${text}</span>`;
-  outputPre.innerHTML += html;
-}
-
-function js_now() {
-  return Date.now();
-}
-
-async function initWasm() {
-  const response = await fetch("zlox.wasm");
-  const bytes = await response.arrayBuffer();
-  const module = new WebAssembly.Module(bytes);
-  const memory = new WebAssembly.Memory({ initial: 32 });
-  const instance = new WebAssembly.Instance(module, {
-    env: { memory, js_write, js_now },
-  });
-  const wasm = instance.exports;
-
-  return { wasm, memory };
-}
-
-function allocateString(string) {
-  const source = encoder.encode(string);
-  const len = source.length;
-
-  const ptr = wasm.alloc(len);
-  if (ptr === null) throw "Cannot allocate memory.";
-
-  const memarr = new Uint8Array(memory.buffer);
-  for (let i = 0; i < len; i++) {
-    memarr[ptr + i] = source[i];
-  }
-
-  return { ptr, len };
-}
-
-function run() {
-  outputPre.innerHTML = "";
-  const source = allocateString(inputArea.value);
-  const result = wasm.runSource(source.ptr, source.len);
-  wasm.free(source.ptr, source.len);
-}
-
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const { wasm, memory } = await initWasm();
-
+const worker = new Worker("worker.js", { type: "module" });
+const runBtn = document.querySelector("#run");
+const samples = document.querySelector("#samples");
 const inputArea = document.querySelector("#input");
 const highlightPre = document.querySelector("#highlight");
 const highlightCode = highlightPre.querySelector("code");
 const outputPre = document.querySelector("#output");
-const runBtn = document.querySelector("#run");
+let busy = false;
 
-runBtn.addEventListener("click", run);
-inputArea.addEventListener("keydown", (e) => {
-  if (e.ctrlKey && e.key === "Enter") run();
-});
+function run(source) {
+  if (busy) return;
+  busy = true;
+
+  runBtn.disabled = true;
+  outputPre.innerHTML = "";
+
+  return new Promise((resolve) => {
+    resolve(worker.postMessage(source));
+  });
+}
+
+function appendOutput(text, isErr) {
+  const html = `<span class="${isErr ? "err" : "out"}">${text}</span>`;
+  document.querySelector("#output").innerHTML += html;
+}
 
 function updateHighlight() {
   let text = inputArea.value;
@@ -68,14 +33,33 @@ function updateHighlight() {
   Prism.highlightElement(highlightCode);
 }
 
+worker.addEventListener("message", (e) => {
+  switch (e.data.type) {
+    case "write":
+      appendOutput(e.data.text, e.data.isErr);
+      break;
+
+    case "result":
+      runBtn.disabled = false;
+      busy = false;
+      break;
+  }
+});
+
+runBtn.addEventListener("click", () => run(inputArea.value));
+
+samples.addEventListener("change", async () => {
+  const response = await fetch(`samples/${samples.value}.lox`);
+  const text = await response.text();
+  inputArea.value = text;
+  updateHighlight();
+});
+
+inputArea.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && e.key === "Enter") run(inputArea.value);
+});
 inputArea.addEventListener("input", updateHighlight);
 inputArea.addEventListener("scroll", () => {
   highlightPre.scrollTop = inputArea.scrollTop;
   highlightPre.scrollLeft = inputArea.scrollLeft;
-});
-
-const samples = document.querySelector("#samples");
-
-samples.addEventListener("change", () => {
-  console.log(samples.value);
 });
