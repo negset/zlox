@@ -63,3 +63,26 @@ inputArea.addEventListener("scroll", () => {
   highlightPre.scrollTop = inputArea.scrollTop;
   highlightPre.scrollLeft = inputArea.scrollLeft;
 });
+
+// ref: https://prismjs.com/extending
+Prism.languages.lox = {
+  comment: {
+    pattern: /\/\/.*/,
+    greedy: true,
+  },
+  string: {
+    pattern: /(")(?:\\(?:\r\n|[\s\S])|(?!\1)[^\\\r\n])*\1/,
+    greedy: true,
+  },
+  "class-name": {
+    pattern: /(\bclass\s+|\bclass\s+\w+\s*<\s*)\w+/,
+    lookbehind: true,
+  },
+  keyword:
+    /\b(?:class|else|for|fun|if|nil|print|return|super|this|var|while)\b/,
+  boolean: /\b(?:false|true)\b/,
+  function: /\b\w+(?=\()/,
+  number: /\b\d+(?:\.\d+)?\b/,
+  operator: /[+\-*/]|[<>]=?|[!=]=|\b(?:and|or)\b/,
+  punctuation: /[{}[\];(),.]/,
+};
