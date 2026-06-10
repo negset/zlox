@@ -1,0 +1,21 @@
+class Fruit {
+  init(color) {
+    this.color = color;
+  }
+
+  showColor() {
+    print "Color: " + this.color;
+  }
+}
+
+class Apple < Fruit {
+  init(color, name) {
+    super.init(color);
+    this.name = name;
+  }
+}
+
+var apple = Apple("#FF0000", "Fuji");
+print apple.color;
+print apple.name;
+apple.showColor();
