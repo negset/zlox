@@ -62,15 +62,15 @@ const MainNatives = struct {
         return .{
             .ptr = self,
             .vtable = &.{
-                .now = now,
+                .clock = clock,
             },
         };
     }
 
-    fn now(vm: *VM, _: u8, _: [*]Value) Value {
+    fn clock(vm: *VM, _: u8, _: [*]Value) Value {
         const self: *@This() = @ptrCast(@alignCast(vm.natives.ptr));
-        const clk = std.Io.Clock.real;
-        const timestamp: f64 = @floatFromInt(clk.now(self.io).toMilliseconds());
+        const c = std.Io.Clock.real;
+        const timestamp = @as(f64, @floatFromInt(c.now(self.io).toMilliseconds())) / 1000.0;
         return .init(timestamp);
     }
 };

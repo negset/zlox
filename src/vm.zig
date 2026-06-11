@@ -50,7 +50,7 @@ pub const Natives = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        now: NativeFn,
+        clock: NativeFn,
     };
 };
 

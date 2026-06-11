@@ -53,17 +53,17 @@ const WasmNatives = struct {
         return .{
             .ptr = self,
             .vtable = &.{
-                .now = now,
+                .clock = clock,
             },
         };
     }
 
-    fn now(_: *VM, _: u8, _: [*]Value) Value {
-        return .init(js_now());
+    fn clock(_: *VM, _: u8, _: [*]Value) Value {
+        return .init(js_clock());
     }
 };
 
-extern fn js_now() f64;
+extern fn js_clock() f64;
 extern fn js_write(ptr: [*]const u8, len: usize, is_err: bool) void;
 
 export fn alloc(len: usize) ?[*]const u8 {
