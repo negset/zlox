@@ -1,6 +1,6 @@
 const worker = new Worker("worker.js", { type: "module" });
 const runBtn = document.querySelector("#run");
-const runBtnText = runBtn.textContent;
+const runBtnText = runBtn.innerHTML;
 const samples = document.querySelector("#samples");
 const inputArea = document.querySelector("#input");
 const highlightPre = document.querySelector("#highlight");
@@ -13,7 +13,7 @@ function run(source) {
   busy = true;
 
   runBtn.disabled = true;
-  runBtn.textContent = "Running...";
+  runBtn.innerHTML = "Running...";
   outputPre.innerHTML = "";
 
   return new Promise((resolve) => {
@@ -51,7 +51,7 @@ worker.addEventListener("message", (e) => {
     case "result":
       busy = false;
       runBtn.disabled = false;
-      runBtn.textContent = runBtnText;
+      runBtn.innerHTML = runBtnText;
       break;
   }
 });
@@ -79,11 +79,11 @@ inputArea.addEventListener("scroll", () => {
 
 // ref: https://prismjs.com/extending
 Prism.languages.lox = {
-  "comment": {
+  comment: {
     pattern: /\/\/.*/,
     greedy: true,
   },
-  "string": {
+  string: {
     pattern: /"[\s\S]*?"/,
     greedy: true,
   },
@@ -97,12 +97,11 @@ Prism.languages.lox = {
       lookbehind: true,
     },
   ],
-  "keyword":
-    /\b(?:class|else|for|fun|if|print|return|super|this|var|while)\b/,
-  "boolean": /\b(?:false|true)\b/,
-  "function": /\b\w+(?=\()/,
-  "number": /\b\d+(?:\.\d+)?\b/,
-  "operator": /[+\-*/!]|[<>]=?|[!=]=|\b(?:and|or)\b/,
-  "punctuation": /[{};(),.]/,
-  "constant": /\bnil\b/,
+  keyword: /\b(?:class|else|for|fun|if|print|return|super|this|var|while)\b/,
+  boolean: /\b(?:false|true)\b/,
+  function: /\b\w+(?=\()/,
+  number: /\b\d+(?:\.\d+)?\b/,
+  operator: /[+\-*/!]|[<>]=?|[!=]=|\b(?:and|or)\b/,
+  punctuation: /[{};(),.]/,
+  constant: /\bnil\b/,
 };

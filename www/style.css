@@ -12,6 +12,7 @@ body {
 
 header {
   display: flex;
+  align-items: center;
 }
 
 footer {
@@ -27,19 +28,30 @@ a {
   color: inherit;
 }
 
+p {
+  line-height: 1.5em;
+}
+
 .right-aligned {
-  display: inline-block;
-  margin: auto 0 auto auto;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  gap: 48px;
 }
 
 #samples {
-  margin-right: 24px;
+  font-family: var(--font-monospace);
+  width: 160px;
+  height: 32px;
+  padding: 0 1em;
 }
 
 #run {
   font-family: var(--font-monospace);
+  font-weight: bold;
   width: 128px;
   height: 48px;
+  background-color: #5fa;
 }
 
 pre,
