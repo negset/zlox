@@ -4,7 +4,7 @@ class Fruit {
   }
 
   showColor() {
-    print "Color: " + this.color;
+    print "color: " + this.color;
   }
 }
 
@@ -13,9 +13,13 @@ class Apple < Fruit {
     super.init(color);
     this.name = name;
   }
+
+  showName() {
+    print "name: " + this.name;
+  }
 }
 
-var apple = Apple("#FF0000", "Fuji");
-print apple.color;
-print apple.name;
+var apple = Apple("#FF0000", "Asahi");
+print apple;
+apple.showName();
 apple.showColor();

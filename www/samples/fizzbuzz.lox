@@ -1,0 +1,21 @@
+fun isMultipleOf(n, d) {
+  while (n > 0) {
+    n = n - d;
+  }
+  return n == 0;
+}
+
+for (var i = 1; i <= 100; i = i + 1) {
+  var fizz = isMultipleOf(i, 3);
+  var buzz = isMultipleOf(i, 5);
+
+  if (fizz and buzz) {
+    print "FizzBuzz";
+  } else if (fizz) {
+    print "Fizz";
+  } else if (buzz) {
+    print "Buzz";
+  } else {
+    print i;
+  }
+}

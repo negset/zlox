@@ -1,5 +1,6 @@
 const worker = new Worker("worker.js", { type: "module" });
 const runBtn = document.querySelector("#run");
+const runBtnText = runBtn.textContent;
 const samples = document.querySelector("#samples");
 const inputArea = document.querySelector("#input");
 const highlightPre = document.querySelector("#highlight");
@@ -12,6 +13,7 @@ function run(source) {
   busy = true;
 
   runBtn.disabled = true;
+  runBtn.textContent = "Running...";
   outputPre.innerHTML = "";
 
   return new Promise((resolve) => {
@@ -20,8 +22,15 @@ function run(source) {
 }
 
 function appendOutput(text, isErr) {
-  const html = `<span class="${isErr ? "err" : "out"}">${text}</span>`;
-  document.querySelector("#output").innerHTML += html;
+  const span = document.createElement("span");
+  span.className = isErr ? "err" : "out";
+  span.textContent = text;
+
+  outputPre.appendChild(span);
+
+  requestAnimationFrame(() => {
+    outputPre.scrollTop = outputPre.scrollHeight;
+  });
 }
 
 function updateHighlight() {
@@ -40,8 +49,9 @@ worker.addEventListener("message", (e) => {
       break;
 
     case "result":
-      runBtn.disabled = false;
       busy = false;
+      runBtn.disabled = false;
+      runBtn.textContent = runBtnText;
       break;
   }
 });
@@ -58,7 +68,10 @@ samples.addEventListener("change", async () => {
 inputArea.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key === "Enter") run(inputArea.value);
 });
-inputArea.addEventListener("input", updateHighlight);
+inputArea.addEventListener("input", () => {
+  samples.value = "";
+  updateHighlight();
+});
 inputArea.addEventListener("scroll", () => {
   highlightPre.scrollTop = inputArea.scrollTop;
   highlightPre.scrollLeft = inputArea.scrollLeft;
@@ -66,23 +79,30 @@ inputArea.addEventListener("scroll", () => {
 
 // ref: https://prismjs.com/extending
 Prism.languages.lox = {
-  comment: {
+  "comment": {
     pattern: /\/\/.*/,
     greedy: true,
   },
-  string: {
-    pattern: /(")(?:\\(?:\r\n|[\s\S])|(?!\1)[^\\\r\n])*\1/,
+  "string": {
+    pattern: /"[\s\S]*?"/,
     greedy: true,
   },
-  "class-name": {
-    pattern: /(\bclass\s+|\bclass\s+\w+\s*<\s*)\w+/,
-    lookbehind: true,
-  },
-  keyword:
-    /\b(?:class|else|for|fun|if|nil|print|return|super|this|var|while)\b/,
-  boolean: /\b(?:false|true)\b/,
-  function: /\b\w+(?=\()/,
-  number: /\b\d+(?:\.\d+)?\b/,
-  operator: /[+\-*/]|[<>]=?|[!=]=|\b(?:and|or)\b/,
-  punctuation: /[{}[\];(),.]/,
+  "class-name": [
+    {
+      pattern: /(\bclass\s+\w+\s*<\s*)\w+/,
+      lookbehind: true,
+    },
+    {
+      pattern: /(\bclass\s+)\w+/,
+      lookbehind: true,
+    },
+  ],
+  "keyword":
+    /\b(?:class|else|for|fun|if|print|return|super|this|var|while)\b/,
+  "boolean": /\b(?:false|true)\b/,
+  "function": /\b\w+(?=\()/,
+  "number": /\b\d+(?:\.\d+)?\b/,
+  "operator": /[+\-*/!]|[<>]=?|[!=]=|\b(?:and|or)\b/,
+  "punctuation": /[{};(),.]/,
+  "constant": /\bnil\b/,
 };

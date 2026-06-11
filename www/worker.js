@@ -11,8 +11,8 @@ function js_write(ptr, len, is_err) {
   });
 }
 
-function js_now() {
-  return Date.now();
+function js_clock() {
+  return Date.now() / 1000;
 }
 
 async function initWasm() {
@@ -21,7 +21,7 @@ async function initWasm() {
   const module = new WebAssembly.Module(bytes);
   const memory = new WebAssembly.Memory({ initial: 32 });
   const instance = new WebAssembly.Instance(module, {
-    env: { memory, js_write, js_now },
+    env: { memory, js_write, js_clock },
   });
   return { wasm: instance.exports, memory };
 }

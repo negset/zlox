@@ -3,6 +3,7 @@
 }
 
 body {
+  font-size: 14px;
   color: #ccc;
   background-color: #234;
   margin: 16px 24px;
@@ -13,9 +14,17 @@ header {
   display: flex;
 }
 
+footer {
+  margin: 36px 0px;
+}
+
 h1 {
   font-family: var(--font-monospace);
   display: inline-block;
+}
+
+a {
+  color: inherit;
 }
 
 .right-aligned {
