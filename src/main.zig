@@ -33,7 +33,7 @@ fn readFile(gpa: Allocator, io: std.Io, path: []const u8) ![]const u8 {
     var freader = file.reader(io, &buf);
     const reader = &freader.interface;
 
-    return try reader.readAlloc(gpa, len);
+    return reader.readAlloc(gpa, len);
 }
 
 fn runFile(gpa: Allocator, io: std.Io, vm: *VM, path: []const u8) void {
