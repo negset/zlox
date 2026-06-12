@@ -68,9 +68,8 @@ textarea {
   padding: 16px 24px;
   box-sizing: border-box;
   resize: none;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-y: auto;
+  white-space: pre;
+  overflow: auto;
   tab-size: 4;
 }
 
