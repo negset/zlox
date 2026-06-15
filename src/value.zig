@@ -39,7 +39,7 @@ const ValueU64 = struct {
         return switch (T) {
             f64 => @bitCast(self.bin),
             bool => self.bin == true_value.bin,
-            *Obj => @ptrFromInt(self.bin & ~(sign_bit | qnan)),
+            *Obj => @ptrFromInt(@as(usize, @truncate(self.bin & ~(sign_bit | qnan)))),
             else => @compileError("Unsupported type: " ++ @typeName(T)),
         };
     }
