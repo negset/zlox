@@ -6,8 +6,10 @@ body {
   font-size: 14px;
   color: #ccc;
   background-color: #234;
-  margin: 16px 24px;
+  margin: 16px auto;
+  padding-inline: 24px;
   max-width: 960px;
+  box-sizing: border-box;
 }
 
 header {
