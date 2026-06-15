@@ -785,6 +785,7 @@ pub const Parser = struct {
 
     fn forStatement(self: *Parser) Error!void {
         self.beginScope();
+
         try self.consume(.left_paren, "Expect '(' after 'for'.");
         // Initializer clause is optional.
         if (try self.match(.semicolon)) {

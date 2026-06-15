@@ -513,8 +513,7 @@ pub const VM = struct {
                     }
                 },
                 .print => {
-                    try self.pop().print(self.out);
-                    try self.out.print("\n", .{});
+                    try self.out.print("{f}\n", .{self.pop()});
                     try self.out.flush();
                 },
                 .jump => {

@@ -54,7 +54,7 @@ const ValueU64 = struct {
         };
     }
 
-    pub fn print(self: @This(), w: *Writer) Writer.Error!void {
+    pub fn format(self: @This(), w: *Writer) Writer.Error!void {
         if (self.is(bool)) {
             try w.print("{}", .{self.as(bool)});
         } else if (self.is(void)) {
@@ -62,7 +62,7 @@ const ValueU64 = struct {
         } else if (self.is(f64)) {
             try w.print("{}", .{self.as(f64)});
         } else if (self.is(*Obj)) {
-            try self.as(*Obj).print(w);
+            try w.print("{f}", .{self.as(*Obj)});
         }
     }
 
@@ -126,12 +126,12 @@ const ValueTaggedUnion = union(enum) {
         };
     }
 
-    pub fn print(self: @This(), w: *Writer) Writer.Error!void {
+    pub fn format(self: @This(), w: *Writer) Writer.Error!void {
         switch (self) {
             .number => |f| try w.print("{}", .{f}),
             .nil => try w.print("nil", .{}),
             .bool => |b| try w.print("{}", .{b}),
-            .obj => |o| try o.print(w),
+            .obj => |o| try w.print("{f}", .{o}),
         }
     }
 

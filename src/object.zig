@@ -54,10 +54,10 @@ pub const Obj = struct {
         }
     }
 
-    pub fn print(self: *Obj, w: *Writer) Writer.Error!void {
+    pub fn format(self: *Obj, w: *Writer) Writer.Error!void {
         switch (self.obj_type) {
             inline else => |obj_type| {
-                try self.as(obj_type).print(w);
+                try w.print("{f}", .{self.as(obj_type)});
             },
         }
     }
@@ -80,8 +80,8 @@ pub const ObjBoundMethod = struct {
         // Don't free "receiver" and "method" because GC manages it.
     }
 
-    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
-        try self.method.function.print(w);
+    pub fn format(self: *const @This(), w: *Writer) Writer.Error!void {
+        try w.print("{f}", .{self.method.function});
     }
 };
 
@@ -103,7 +103,7 @@ pub const ObjClass = struct {
         // Don't free "name" because GC manages it.
     }
 
-    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
+    pub fn format(self: *const @This(), w: *Writer) Writer.Error!void {
         try w.print("{s}", .{self.name.string});
     }
 };
@@ -132,8 +132,8 @@ pub const ObjClosure = struct {
         // Don't free "function" because closure does'nt own it.
     }
 
-    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
-        try self.function.print(w);
+    pub fn format(self: *const @This(), w: *Writer) Writer.Error!void {
+        try w.print("{f}", .{self.function});
     }
 };
 
@@ -160,7 +160,7 @@ pub const ObjFunction = struct {
         // Don't free "name" because GC manages it.
     }
 
-    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
+    pub fn format(self: *const @This(), w: *Writer) Writer.Error!void {
         if (self.name) |name| {
             try w.print("<fn {s}>", .{name.string});
         } else {
@@ -187,7 +187,7 @@ pub const ObjInstance = struct {
         gpa.destroy(self);
     }
 
-    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
+    pub fn format(self: *const @This(), w: *Writer) Writer.Error!void {
         try w.print("{s} instance", .{self.class.name.string});
     }
 };
@@ -208,7 +208,7 @@ pub const ObjNative = struct {
         gpa.destroy(self);
     }
 
-    pub fn print(_: *const @This(), w: *Writer) Writer.Error!void {
+    pub fn format(_: *const @This(), w: *Writer) Writer.Error!void {
         try w.print("<native fn>", .{});
     }
 };
@@ -256,7 +256,7 @@ pub const ObjString = struct {
         gpa.destroy(self);
     }
 
-    pub fn print(self: *const @This(), w: *Writer) Writer.Error!void {
+    pub fn format(self: *const @This(), w: *Writer) Writer.Error!void {
         try w.print("{s}", .{self.string});
     }
 
@@ -291,7 +291,7 @@ pub const ObjUpvalue = struct {
         gpa.destroy(self);
     }
 
-    pub fn print(_: *const @This(), w: *Writer) Writer.Error!void {
+    pub fn format(_: *const @This(), w: *Writer) Writer.Error!void {
         // Users can't print upvalues since they are not first-class values.
         // Called during GC logging.
         try w.print("upvalue", .{});
