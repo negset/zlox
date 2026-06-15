@@ -294,7 +294,7 @@ pub const VM = struct {
 
     fn captureUpvalue(self: *VM, local: [*]Value) RuntimeError!*ObjUpvalue {
         var previous: ?*ObjUpvalue = null;
-        var current: ?*ObjUpvalue = self.open_upvalues;
+        var current = self.open_upvalues;
 
         while (current) |cur| : (current = cur.next) {
             if (cur.location - local <= 0) break;
@@ -554,10 +554,11 @@ pub const VM = struct {
                     for (0..closure.upvalues.len) |i| {
                         const is_local = frame.readByte();
                         const index = frame.readByte();
-                        closure.upvalues[i] = if (is_local != 0)
-                            try self.captureUpvalue(frame.slots + index)
-                        else
-                            frame.closure.upvalues[index];
+                        closure.upvalues[i] =
+                            if (is_local != 0)
+                                try self.captureUpvalue(frame.slots + index)
+                            else
+                                frame.closure.upvalues[index];
                     }
                 },
                 .close_upvalue => {
