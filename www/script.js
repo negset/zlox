@@ -101,7 +101,7 @@ Prism.languages.lox = {
   boolean: /\b(?:false|true)\b/,
   function: /\b\w+(?=\()/,
   number: /\b\d+(?:\.\d+)?\b/,
-  operator: /[+\-*/!]|[<>]=?|[!=]=|\b(?:and|or)\b/,
+  operator: /[+\-*/!]|[<>]=?|[!=]=|=|\b(?:and|or)\b/,
   punctuation: /[{};(),.]/,
   constant: /\bnil\b/,
 };
