@@ -14,18 +14,19 @@ pub fn disassembleChunk(chunk: *const Chunk, name: []const u8) void {
 
 fn constantInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
     const constant = chunk.code.items[offset + 1];
-    std.debug.print("{s:<16} {d:>4} '", .{ name, constant });
-    chunk.constants.items[constant].print();
-    std.debug.print("'\n", .{});
+    const value = chunk.constants.items[constant];
+    std.debug.print("{s:<16} {d:>4} '{f}'\n", .{ name, constant, value });
     return offset + 2;
 }
 
 fn invokeInstruction(name: []const u8, chunk: *const Chunk, offset: usize) usize {
     const constant = chunk.code.items[offset + 1];
     const arg_count = chunk.code.items[offset + 2];
-    std.debug.print("{s:<16} ({} args) {d:>4} '", .{ name, arg_count, constant });
-    chunk.constants.items[constant].print();
-    std.debug.print("'\n", .{});
+    const value = chunk.constants.items[constant];
+    std.debug.print(
+        "{s:<16} ({} args) {d:>4} '{f}'\n",
+        .{ name, arg_count, constant, value },
+    );
     return offset + 3;
 }
 
@@ -92,10 +93,8 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         .closure,
         => blk: {
             const constant = chunk.code.items[offset + 1];
-            std.debug.print("{s:<16} {d:>4} ", .{ name, constant });
             const value = chunk.constants.items[constant];
-            value.print();
-            std.debug.print("\n", .{});
+            std.debug.print("{s:<16} {d:>4} {f}\n", .{ name, constant, value });
 
             const function = value.as(*Obj).as(.function);
 

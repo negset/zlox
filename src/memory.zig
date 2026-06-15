@@ -125,9 +125,7 @@ pub const GC = struct {
             if (obj.is_marked) return;
 
             if (comptime config.log_gc) {
-                std.debug.print("0x{x} mark ", .{@intFromPtr(obj)});
-                obj.print();
-                std.debug.print("\n", .{});
+                std.debug.print("0x{x} mark {f}\n", .{ @intFromPtr(obj), obj });
             }
 
             obj.is_marked = true;
@@ -175,9 +173,7 @@ pub const GC = struct {
 
     fn blackenObject(self: *@This(), object: *Obj) void {
         if (comptime config.log_gc) {
-            std.debug.print("0x{x} blacken ", .{@intFromPtr(object)});
-            object.print();
-            std.debug.print("\n", .{});
+            std.debug.print("0x{x} blacken {f}\n", .{ @intFromPtr(object), object });
         }
 
         switch (object.obj_type) {

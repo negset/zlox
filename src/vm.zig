@@ -376,9 +376,7 @@ pub const VM = struct {
             if (comptime config.trace_execution) {
                 std.debug.print("          ", .{});
                 for (self.stack.items) |slot| {
-                    std.debug.print("[ ", .{});
-                    slot.print();
-                    std.debug.print(" ]", .{});
+                    std.debug.print("[ {f} ]", .{slot});
                 }
                 std.debug.print("\n", .{});
                 _ = debug.disassembleInstruction(&frame.closure.function.chunk, frame.ip);
