@@ -41,7 +41,7 @@ pub const CallFrame = struct {
     }
 
     pub fn readString(self: *CallFrame) *ObjString {
-        return self.readConstant().as(*Obj).as(.string);
+        return self.readConstant().asObjType(.string);
     }
 };
 
@@ -202,7 +202,7 @@ pub const VM = struct {
                     const index = self.stack.items.len - 1 - arg_count;
                     self.stack.items[index] = .init(&instance.obj);
                     if (class.methods.get(self.init_string)) |initializer| {
-                        try self.call(initializer.as(*Obj).as(.closure), arg_count);
+                        try self.call(initializer.asObjType(.closure), arg_count);
                     } else if (arg_count != 0) {
                         return self.runtimeError(
                             error.InvalidOperand,
@@ -243,7 +243,7 @@ pub const VM = struct {
         arg_count: u8,
     ) RuntimeError!void {
         if (class.methods.get(name)) |method| {
-            return self.call(method.as(*Obj).as(.closure), arg_count);
+            return self.call(method.asObjType(.closure), arg_count);
         }
 
         return self.runtimeError(
@@ -264,7 +264,7 @@ pub const VM = struct {
             );
         }
 
-        const instance = receiver.as(*Obj).as(.instance);
+        const instance = receiver.asObjType(.instance);
 
         // In case "name" is a field, not a method, assume it is a callable value.
         if (instance.fields.get(name)) |value| {
@@ -278,7 +278,7 @@ pub const VM = struct {
 
     fn bindMethod(self: *VM, class: *ObjClass, name: *ObjString) RuntimeError!void {
         if (class.methods.get(name)) |method| {
-            const closure = method.as(*Obj).as(.closure);
+            const closure = method.asObjType(.closure);
             // To prevent GC from collecting receiver, use "peek" instead of "pop".
             const bound = try ObjBoundMethod.create(&self.gc, self.peek(0), closure);
             _ = self.pop();
@@ -327,7 +327,7 @@ pub const VM = struct {
 
     fn defineMethod(self: *VM, name: *ObjString) RuntimeError!void {
         const method = self.peek(0);
-        const class = self.peek(1).as(*Obj).as(.class);
+        const class = self.peek(1).asObjType(.class);
         try class.methods.put(self.gc.allocator(), name, method);
         // Pop method.
         _ = self.pop();
@@ -335,8 +335,8 @@ pub const VM = struct {
 
     fn concatenate(self: *VM) RuntimeError!void {
         // To prevent GC from collecting "a" and "b", use "peek" insted of "pop".
-        const b = self.peek(0).as(*Obj).as(.string).string;
-        const a = self.peek(1).as(*Obj).as(.string).string;
+        const b = self.peek(0).asObjType(.string).string;
+        const a = self.peek(1).asObjType(.string).string;
 
         const string = try std.mem.concat(self.gc.allocator(), u8, &.{ a, b });
         const result = try ObjString.createByTake(&self.gc, string);
@@ -443,7 +443,7 @@ pub const VM = struct {
                         );
                     }
 
-                    const instance = self.peek(0).as(*Obj).as(.instance);
+                    const instance = self.peek(0).asObjType(.instance);
                     const name = frame.readString();
 
                     if (instance.fields.get(name)) |value| {
@@ -463,7 +463,7 @@ pub const VM = struct {
                         );
                     }
 
-                    const instance = self.peek(1).as(*Obj).as(.instance);
+                    const instance = self.peek(1).asObjType(.instance);
                     const obj_string = frame.readString();
                     try instance.fields.put(self.gc.allocator(), obj_string, self.peek(0));
                     const value = self.pop();
@@ -472,7 +472,7 @@ pub const VM = struct {
                 },
                 .get_super => {
                     const name = frame.readString();
-                    const superclass = self.pop().as(*Obj).as(.class);
+                    const superclass = self.pop().asObjType(.class);
 
                     try self.bindMethod(superclass, name);
                 },
@@ -544,13 +544,13 @@ pub const VM = struct {
                 .super_invoke => {
                     const method = frame.readString();
                     const arg_count = frame.readByte();
-                    const superclass = self.pop().as(*Obj).as(.class);
+                    const superclass = self.pop().asObjType(.class);
                     try self.invokeFromClass(superclass, method, arg_count);
                     // Update "frame" with the newly created one.
                     frame = &self.frames.items[self.frames.items.len - 1];
                 },
                 .closure => {
-                    const function = frame.readConstant().as(*Obj).as(.function);
+                    const function = frame.readConstant().asObjType(.function);
                     const closure = try ObjClosure.create(&self.gc, function);
                     self.push(.init(&closure.obj));
                     for (0..closure.upvalues.len) |i| {
@@ -599,9 +599,9 @@ pub const VM = struct {
                         );
                     }
 
-                    const subclass = self.peek(0).as(*Obj).as(.class);
+                    const subclass = self.peek(0).asObjType(.class);
 
-                    var iter = superclass.as(*Obj).as(.class).methods.iterator();
+                    var iter = superclass.asObjType(.class).methods.iterator();
                     while (iter.next()) |entry| {
                         try subclass.methods.put(
                             self.gc.allocator(),

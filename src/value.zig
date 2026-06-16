@@ -6,6 +6,20 @@ const config = @import("config");
 
 pub const Value = if (config.nan_boxing) ValueU64 else ValueTaggedUnion;
 
+const ValueUtils = struct {
+    fn isFalsey(v: Value) bool {
+        return v.is(void) or v.is(bool) and !v.as(bool);
+    }
+
+    fn asObjType(v: Value, comptime obj_type: ObjType) *obj_type.Impl() {
+        return v.as(*Obj).as(obj_type);
+    }
+
+    fn isObjType(v: Value, comptime obj_type: ObjType) bool {
+        return v.is(*Obj) and v.as(*Obj).obj_type == obj_type;
+    }
+};
+
 const ValueU64 = struct {
     bin: u64,
 
@@ -76,14 +90,15 @@ const ValueU64 = struct {
     }
 
     pub fn isFalsey(self: @This()) bool {
-        return self.is(void) or self.is(bool) and !self.as(bool);
+        return ValueUtils.isFalsey(self);
     }
 
-    pub fn isObjType(self: @This(), obj_type: ObjType) bool {
-        return if (self.is(*Obj))
-            self.as(*Obj).obj_type == obj_type
-        else
-            false;
+    pub fn asObjType(self: @This(), comptime obj_type: ObjType) *obj_type.Impl() {
+        return ValueUtils.asObjType(self, obj_type);
+    }
+
+    pub fn isObjType(self: @This(), comptime obj_type: ObjType) bool {
+        return ValueUtils.isObjType(self, obj_type);
     }
 };
 
@@ -146,14 +161,15 @@ const ValueTaggedUnion = union(enum) {
     }
 
     pub fn isFalsey(self: @This()) bool {
-        return self == .nil or self == .bool and !self.bool;
+        return ValueUtils.isFalsey(self);
     }
 
-    pub fn isObjType(self: @This(), obj_type: ObjType) bool {
-        return switch (self) {
-            .obj => |obj| obj.obj_type == obj_type,
-            else => false,
-        };
+    pub fn asObjType(self: @This(), comptime obj_type: ObjType) *obj_type.Impl() {
+        return ValueUtils.asObjType(self, obj_type);
+    }
+
+    pub fn isObjType(self: @This(), comptime obj_type: ObjType) bool {
+        return ValueUtils.isObjType(self, obj_type);
     }
 };
 
