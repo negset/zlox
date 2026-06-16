@@ -292,12 +292,12 @@ pub const VM = struct {
         }
     }
 
-    fn captureUpvalue(self: *VM, local: [*]Value) RuntimeError!*ObjUpvalue {
+    fn captureUpvalue(self: *VM, local: *Value) RuntimeError!*ObjUpvalue {
         var previous: ?*ObjUpvalue = null;
         var current = self.open_upvalues;
 
         while (current) |cur| : (current = cur.next) {
-            if (cur.location - local <= 0) break;
+            if (@intFromPtr(cur.location) <= @intFromPtr(local)) break;
             previous = cur;
         }
 
@@ -317,11 +317,11 @@ pub const VM = struct {
         return new;
     }
 
-    fn closeUpvalues(self: *VM, last: [*]Value) void {
+    fn closeUpvalues(self: *VM, last: *Value) void {
         while (self.open_upvalues) |upvalue| : (self.open_upvalues = upvalue.next) {
-            if (upvalue.location - last < 0) break;
-            upvalue.closed = upvalue.location[0];
-            upvalue.location = @ptrCast(&upvalue.closed);
+            if (@intFromPtr(upvalue.location) < @intFromPtr(last)) break;
+            upvalue.closed = upvalue.location.*;
+            upvalue.location = &upvalue.closed;
         }
     }
 
@@ -426,11 +426,13 @@ pub const VM = struct {
                 },
                 .get_upvalue => {
                     const slot = frame.readByte();
-                    self.push(frame.closure.upvalues[slot].?.location[0]);
+                    const upvalue = frame.closure.upvalues[slot].?;
+                    self.push(upvalue.location.*);
                 },
                 .set_upvalue => {
                     const slot = frame.readByte();
-                    frame.closure.upvalues[slot].?.location[0] = self.peek(0);
+                    const upvalue = frame.closure.upvalues[slot].?;
+                    upvalue.location.* = self.peek(0);
                 },
                 .get_property => blk: {
                     if (!self.peek(0).isObjType(.instance)) {
@@ -556,18 +558,18 @@ pub const VM = struct {
                         const index = frame.readByte();
                         closure.upvalues[i] =
                             if (is_local != 0)
-                                try self.captureUpvalue(frame.slots + index)
+                                try self.captureUpvalue(&frame.slots[index])
                             else
                                 frame.closure.upvalues[index];
                     }
                 },
                 .close_upvalue => {
-                    self.closeUpvalues(self.stack.items.ptr + self.stack.items.len - 1);
+                    self.closeUpvalues(&self.stack.items.ptr[self.stack.items.len - 1]);
                     _ = self.pop();
                 },
                 .@"return" => {
                     const result = self.pop();
-                    self.closeUpvalues(frame.slots);
+                    self.closeUpvalues(&frame.slots[0]);
 
                     const discarded = self.frames.pop() orelse unreachable;
                     if (self.frames.items.len == 0) {

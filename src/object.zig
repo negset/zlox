@@ -275,14 +275,14 @@ pub const ObjString = struct {
 
 pub const ObjUpvalue = struct {
     obj: Obj,
-    location: [*]Value,
+    location: *Value,
     closed: Value,
     next: ?*@This(),
 
-    pub fn create(gc: *GC, slot: [*]Value) Allocator.Error!*@This() {
+    pub fn create(gc: *GC, location: *Value) Allocator.Error!*@This() {
         const new = try gc.createObject(.upvalue);
         new.closed = .nil_value;
-        new.location = slot;
+        new.location = location;
         new.next = null;
         return new;
     }
