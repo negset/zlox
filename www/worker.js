@@ -12,7 +12,7 @@ function js_write(ptr, len, is_err) {
 }
 
 function js_clock() {
-  return Date.now() / 1000;
+  return performance.now() / 1000;
 }
 
 async function initWasm() {

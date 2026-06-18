@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Clock = std.Io.Clock;
 const GC = @import("memory.zig").GC;
 const Value = @import("value.zig").Value;
 const Natives = @import("vm.zig").Natives;
@@ -69,9 +70,9 @@ const MainNatives = struct {
 
     fn clock(vm: *VM, _: u8, _: [*]Value) Value {
         const self: *@This() = @ptrCast(@alignCast(vm.natives.ptr));
-        const c = std.Io.Clock.real;
-        const timestamp = @as(f64, @floatFromInt(c.now(self.io).toMilliseconds())) / 1000.0;
-        return .init(timestamp);
+        const now_ns = Clock.awake.now(self.io).nanoseconds;
+        const now_s = @as(f64, @floatFromInt(now_ns)) / std.time.ns_per_s;
+        return .init(now_s);
     }
 };
 
