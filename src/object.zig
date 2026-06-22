@@ -140,7 +140,7 @@ pub const ObjClosure = struct {
 pub const ObjFunction = struct {
     obj: Obj,
     arity: u8,
-    upvalue_count: u8,
+    upvalue_count: usize,
     chunk: Chunk,
     // Null if it is top-level code.
     name: ?*ObjString,

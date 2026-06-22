@@ -36,7 +36,7 @@ pub const Compiler = struct {
     function_type: FunctionType,
 
     locals: [u8_count]Local,
-    local_count: u8,
+    local_count: usize,
     upvalues: [u8_count]Upvalue,
     scope_depth: u8,
 

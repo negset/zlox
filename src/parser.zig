@@ -303,7 +303,7 @@ pub const Parser = struct {
             .index = index,
         };
         compiler.function.?.upvalue_count += 1;
-        return upvalue_count;
+        return @intCast(upvalue_count);
     }
 
     fn resolveUpvalue(self: *Parser, compiler: *Compiler, name: Token) Error!?u8 {
