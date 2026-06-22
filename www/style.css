@@ -24,6 +24,7 @@ footer {
 h1 {
   font-family: var(--font-monospace);
   display: inline-block;
+  text-transform: uppercase;
 }
 
 a {
