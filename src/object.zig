@@ -77,7 +77,7 @@ pub const ObjBoundMethod = struct {
 
     pub fn destroy(self: *@This(), gpa: Allocator) void {
         gpa.destroy(self);
-        // Don't free "receiver" and "method" because GC manages it.
+        // Don't free "method" because GC manages it.
     }
 
     pub fn format(self: *const @This(), w: *Writer) Writer.Error!void {
