@@ -27,20 +27,20 @@ const WasmWriter = struct {
 
         if (w.end > 0) {
             const buffered = w.buffered();
-            js_write(buffered.ptr, buffered.len, self.is_err);
+            jsWrite(buffered.ptr, buffered.len, self.is_err);
             w.end = 0;
         }
 
         var total_consumed: usize = 0;
 
         for (data[0 .. data.len - 1]) |slice| {
-            js_write(slice.ptr, slice.len, self.is_err);
+            jsWrite(slice.ptr, slice.len, self.is_err);
             total_consumed += slice.len;
         }
 
         const last = data[data.len - 1];
         for (0..splat) |_| {
-            js_write(last.ptr, last.len, self.is_err);
+            jsWrite(last.ptr, last.len, self.is_err);
         }
         total_consumed += last.len * splat;
 
@@ -59,12 +59,12 @@ const WasmNatives = struct {
     }
 
     fn clock(_: *VM, _: u8, _: [*]Value) Value {
-        return .init(js_clock());
+        return .init(jsClock());
     }
 };
 
-extern fn js_clock() f64;
-extern fn js_write(ptr: [*]const u8, len: usize, is_err: bool) void;
+extern fn jsClock() f64;
+extern fn jsWrite(ptr: [*]const u8, len: usize, is_err: bool) void;
 
 export fn alloc(len: usize) ?[*]const u8 {
     const mem = allocator.alloc(u8, len) catch return null;

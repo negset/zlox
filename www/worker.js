@@ -2,16 +2,16 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const { wasm, memory } = await initWasm();
 
-function js_write(ptr, len, is_err) {
+function jsWrite(ptr, len, isErr) {
   const bytes = new Uint8Array(memory.buffer, ptr, len);
   self.postMessage({
     type: "write",
     text: decoder.decode(bytes),
-    isErr: is_err,
+    isErr,
   });
 }
 
-function js_clock() {
+function jsClock() {
   return performance.now() / 1000;
 }
 
@@ -21,7 +21,7 @@ async function initWasm() {
   const module = new WebAssembly.Module(bytes);
   const memory = new WebAssembly.Memory({ initial: 32 });
   const instance = new WebAssembly.Instance(module, {
-    env: { memory, js_write, js_clock },
+    env: { memory, jsWrite, jsClock },
   });
   return { wasm: instance.exports, memory };
 }
