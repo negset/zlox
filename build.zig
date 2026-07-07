@@ -33,14 +33,14 @@ fn buildExe(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Op
     exe.root_module.addOptions("config", opts);
     b.installArtifact(exe);
 
-    const run_exe = b.addRunArtifact(exe);
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_exe.step);
-    run_exe.step.dependOn(b.getInstallStep());
+    const run = b.addRunArtifact(exe);
+    const step = b.step("run", "Run the app");
+    step.dependOn(&run.step);
+    run.step.dependOn(b.getInstallStep());
 
     // Pass the arguments through as is.
     if (b.args) |args| {
-        run_exe.addArgs(args);
+        run.addArgs(args);
     }
 }
 
@@ -55,13 +55,13 @@ fn buildTest(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *O
     });
     tests.root_module.addOptions("config", opts);
 
-    const run_tests = b.addRunArtifact(tests);
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_tests.step);
+    const run = b.addRunArtifact(tests);
+    const step = b.step("test", "Run tests");
+    step.dependOn(&run.step);
 }
 
 fn buildWasm(b: *Build, optimize: OptimizeMode, opts: *Options) void {
-    const wasm = b.addExecutable(.{
+    const exe = b.addExecutable(.{
         .name = "zlox",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/wasm.zig"),
@@ -72,15 +72,18 @@ fn buildWasm(b: *Build, optimize: OptimizeMode, opts: *Options) void {
             .optimize = optimize,
         }),
     });
-    wasm.root_module.addOptions("config", opts);
+    exe.root_module.addOptions("config", opts);
 
-    wasm.entry = .disabled;
-    wasm.rdynamic = true;
-    wasm.import_memory = true;
+    exe.entry = .disabled;
+    exe.rdynamic = true;
+    exe.import_memory = true;
 
-    const install_wasm = b.addInstallArtifact(wasm, .{});
-    const wasm_step = b.step("wasm", "Build Wasm module");
-    wasm_step.dependOn(&install_wasm.step);
+    const install = b.addInstallArtifact(exe, .{});
+    const step = b.step("wasm", "Build Wasm module");
+    step.dependOn(&install.step);
+
+    const copy = b.addInstallFile(exe.getEmittedBin(), "../www/zlox.wasm");
+    install.step.dependOn(&copy.step);
 }
 
 pub fn build(b: *Build) void {
