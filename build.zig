@@ -39,9 +39,7 @@ fn buildExe(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Op
     run.step.dependOn(b.getInstallStep());
 
     // Pass the arguments through as is.
-    if (b.args) |args| {
-        run.addArgs(args);
-    }
+    run.addPassthruArgs();
 }
 
 fn buildTest(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Options) void {

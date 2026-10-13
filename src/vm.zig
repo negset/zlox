@@ -89,10 +89,11 @@ pub const VM = struct {
         // Add marker after initialize VM roots.
         try self.gc.addRootMarker(self, markVMRoots);
 
-        inline for (std.meta.fields(Natives.VTable)) |field| {
+        const info = @typeInfo(Natives.VTable).@"struct";
+        inline for (info.field_names) |name| {
             try self.defineNative(
-                field.name,
-                @field(natives.vtable, field.name),
+                name,
+                @field(natives.vtable, name),
             );
         }
     }

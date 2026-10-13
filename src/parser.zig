@@ -144,9 +144,9 @@ pub const Parser = struct {
                 if (T != OpCode) @compileError("Incompatible enum type to emit: " ++ @typeName(T));
                 try self.currentChunk().write(self.gc.allocator(), @intFromEnum(data), self.previous.line);
             },
-            .@"struct" => |s| {
-                inline for (s.fields) |field| {
-                    try self.emit(@field(data, field.name));
+            .@"struct" => |info| {
+                inline for (info.field_names) |name| {
+                    try self.emit(@field(data, name));
                 }
             },
             else => @compileError("Incompatible type to emit: " ++ @typeName(T)),
