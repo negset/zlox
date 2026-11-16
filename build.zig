@@ -1,5 +1,6 @@
 const std = @import("std");
 const Build = std.Build;
+const InstallDir = Build.InstallDir;
 const Options = Build.Step.Options;
 const OptimizeMode = std.builtin.OptimizeMode;
 const ResolvedTarget = Build.ResolvedTarget;
@@ -76,12 +77,25 @@ fn buildWasm(b: *Build, optimize: OptimizeMode, opts: *Options) void {
     exe.rdynamic = true;
     exe.import_memory = true;
 
-    const install = b.addInstallArtifact(exe, .{});
+    const install_dir: InstallDir = .{ .custom = "web" };
+
+    const install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = install_dir } });
     const step = b.step("wasm", "Build Wasm module");
     step.dependOn(&install.step);
 
-    const copy = b.addInstallFile(exe.getEmittedBin(), "../www/zlox.wasm");
-    install.step.dependOn(&copy.step);
+    const copy_web = b.addInstallDirectory(.{
+        .source_dir = b.path("src/web"),
+        .install_dir = install_dir,
+        .install_subdir = "",
+    });
+    install.step.dependOn(&copy_web.step);
+
+    const copy_samples = b.addInstallDirectory(.{
+        .source_dir = b.path("samples"),
+        .install_dir = install_dir,
+        .install_subdir = "samples",
+    });
+    install.step.dependOn(&copy_samples.step);
 }
 
 pub fn build(b: *Build) void {
