@@ -15,14 +15,18 @@ You can run zlox on the [web playground](https://negset.com/zlox/).
 - Native
 
   ```bash
+  # build
+  zig build
+
   # repl
   zig build run
+
   # run file
   zig build run -- samples/helloworld.lox
   ```
 
-- Wasm
+- Web
 
   ```bash
-  zig build wasm
+  zig build -Dtarget=wasm32-freestanding
   ```

@@ -26,7 +26,7 @@ jobs:
           echo "$GITHUB_WORKSPACE/zig-x86_64-linux-0.17.1" >> "$GITHUB_PATH"
 
       - name: Build web
-        run: zig build wasm --release=small
+        run: zig build -Dtarget=wasm32-freestanding --release=small
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5

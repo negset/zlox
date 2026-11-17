@@ -43,22 +43,6 @@ fn buildExe(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Op
     run.addPassthruArgs();
 }
 
-fn buildTest(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Options) void {
-    const tests = b.addTest(.{
-        .name = "zlox-test",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    tests.root_module.addOptions("config", opts);
-
-    const run = b.addRunArtifact(tests);
-    const step = b.step("test", "Run tests");
-    step.dependOn(&run.step);
-}
-
 fn buildWasm(b: *Build, optimize: OptimizeMode, opts: *Options) void {
     const exe = b.addExecutable(.{
         .name = "zlox",
@@ -80,8 +64,7 @@ fn buildWasm(b: *Build, optimize: OptimizeMode, opts: *Options) void {
     const install_dir: InstallDir = .{ .custom = "web" };
 
     const install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = install_dir } });
-    const step = b.step("wasm", "Build Wasm module");
-    step.dependOn(&install.step);
+    b.getInstallStep().dependOn(&install.step);
 
     const copy_web = b.addInstallDirectory(.{
         .source_dir = b.path("src/web"),
@@ -98,12 +81,32 @@ fn buildWasm(b: *Build, optimize: OptimizeMode, opts: *Options) void {
     install.step.dependOn(&copy_samples.step);
 }
 
+fn buildTest(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Options) void {
+    const tests = b.addTest(.{
+        .name = "zlox-test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    tests.root_module.addOptions("config", opts);
+
+    const run = b.addRunArtifact(tests);
+    const step = b.step("test", "Run tests");
+    step.dependOn(&run.step);
+}
+
 pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const opts = createOptions(b);
 
-    buildExe(b, target, optimize, opts);
+    if (target.query.cpu_arch == .wasm32) {
+        buildWasm(b, optimize, opts);
+    } else {
+        buildExe(b, target, optimize, opts);
+    }
+
     buildTest(b, target, optimize, opts);
-    buildWasm(b, optimize, opts);
 }
