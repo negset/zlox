@@ -383,7 +383,8 @@ pub const VM = struct {
                 _ = debug.disassembleInstruction(&frame.closure.function.chunk, frame.ip);
             }
 
-            switch (@as(OpCode, @enumFromInt(frame.readByte()))) {
+            const op: OpCode = @fromBackingInt(frame.readByte());
+            switch (op) {
                 .constant => self.push(frame.readConstant()),
                 .nil => self.push(.nil_value),
                 .true => self.push(.true_value),

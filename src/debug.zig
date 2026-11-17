@@ -57,7 +57,7 @@ pub fn disassembleInstruction(chunk: *const Chunk, offset: usize) usize {
         std.debug.print("{d:>4} ", .{chunk.lines.items[offset]});
     }
 
-    const instruction: OpCode = @enumFromInt(chunk.code.items[offset]);
+    const instruction: OpCode = @fromBackingInt(chunk.code.items[offset]);
     const name = @tagName(instruction);
 
     return switch (instruction) {

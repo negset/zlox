@@ -31,11 +31,11 @@ const Precedence = enum {
     primary,
 
     pub fn next(self: Precedence) Precedence {
-        return @enumFromInt(@intFromEnum(self) + 1);
+        return @fromBackingInt(@backingInt(self) + 1);
     }
 
     pub fn le(self: Precedence, other: Precedence) bool {
-        return @intFromEnum(self) <= @intFromEnum(other);
+        return @backingInt(self) <= @backingInt(other);
     }
 };
 
@@ -142,7 +142,7 @@ pub const Parser = struct {
             },
             .@"enum" => {
                 if (T != OpCode) @compileError("Incompatible enum type to emit: " ++ @typeName(T));
-                try self.currentChunk().write(self.gc.allocator(), @intFromEnum(data), self.previous.line);
+                try self.currentChunk().write(self.gc.allocator(), @backingInt(data), self.previous.line);
             },
             .@"struct" => |info| {
                 inline for (info.field_names) |name| {
