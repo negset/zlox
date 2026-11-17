@@ -6,20 +6,6 @@ const config = @import("config");
 
 pub const Value = if (config.nan_boxing) ValueU64 else ValueTaggedUnion;
 
-const ValueUtils = struct {
-    fn isFalsey(v: Value) bool {
-        return v.is(void) or v.is(bool) and !v.as(bool);
-    }
-
-    fn asObjType(v: Value, comptime obj_type: ObjType) *obj_type.Impl() {
-        return v.as(*Obj).as(obj_type);
-    }
-
-    fn isObjType(v: Value, comptime obj_type: ObjType) bool {
-        return v.is(*Obj) and v.as(*Obj).obj_type == obj_type;
-    }
-};
-
 const ValueU64 = struct {
     bin: u64,
 
@@ -90,15 +76,15 @@ const ValueU64 = struct {
     }
 
     pub fn isFalsey(self: @This()) bool {
-        return ValueUtils.isFalsey(self);
+        return self.is(void) or self.is(bool) and !self.as(bool);
     }
 
     pub fn asObjType(self: @This(), comptime obj_type: ObjType) *obj_type.Impl() {
-        return ValueUtils.asObjType(self, obj_type);
+        return self.as(*Obj).as(obj_type);
     }
 
     pub fn isObjType(self: @This(), comptime obj_type: ObjType) bool {
-        return ValueUtils.isObjType(self, obj_type);
+        return self.is(*Obj) and self.as(*Obj).obj_type == obj_type;
     }
 };
 
@@ -161,15 +147,15 @@ const ValueTaggedUnion = union(enum) {
     }
 
     pub fn isFalsey(self: @This()) bool {
-        return ValueUtils.isFalsey(self);
+        return self.is(void) or self.is(bool) and !self.as(bool);
     }
 
     pub fn asObjType(self: @This(), comptime obj_type: ObjType) *obj_type.Impl() {
-        return ValueUtils.asObjType(self, obj_type);
+        return self.as(*Obj).as(obj_type);
     }
 
     pub fn isObjType(self: @This(), comptime obj_type: ObjType) bool {
-        return ValueUtils.isObjType(self, obj_type);
+        return self.is(*Obj) and self.as(*Obj).obj_type == obj_type;
     }
 };
 
@@ -235,6 +221,6 @@ test "object conversions" {
         const v = T.init(obj);
         try std.testing.expect(v.is(*Obj));
         try std.testing.expect(v.as(*Obj) == obj);
-        try std.testing.expect(v.isObjType(obj.obj_type));
+        try std.testing.expect(v.isObjType(.string));
     }
 }
