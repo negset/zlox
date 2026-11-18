@@ -43,15 +43,12 @@ fn buildExe(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Op
     run.addPassthruArgs();
 }
 
-fn buildWasm(b: *Build, optimize: OptimizeMode, opts: *Options) void {
+fn buildWasm(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, opts: *Options) void {
     const exe = b.addExecutable(.{
         .name = "zlox",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/wasm.zig"),
-            .target = b.resolveTargetQuery(.{
-                .cpu_arch = .wasm32,
-                .os_tag = .freestanding,
-            }),
+            .target = target,
             .optimize = optimize,
         }),
     });
@@ -102,8 +99,8 @@ pub fn build(b: *Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const opts = createOptions(b);
 
-    if (target.query.cpu_arch == .wasm32) {
-        buildWasm(b, optimize, opts);
+    if (target.query.cpu_arch == .wasm32 and target.query.os_tag == .freestanding) {
+        buildWasm(b, target, optimize, opts);
     } else {
         buildExe(b, target, optimize, opts);
     }
